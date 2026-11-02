@@ -100,8 +100,8 @@ st.markdown(
     }
 
     .block-container {
-        max-width: 1760px;
-        padding: 0.55rem 0.80rem 1.0rem 0.80rem;
+        max-width: 1500px;
+        padding: 0.75rem 1.00rem 1.5rem 1.00rem;
     }
 
     header[data-testid="stHeader"] {
@@ -125,13 +125,13 @@ st.markdown(
         background: var(--header);
         border: 1px solid var(--border);
         border-bottom: none;
-        padding: 0.28rem 0.46rem;
-        font-size: 0.82rem;
-        line-height: 1.05rem;
+        padding: 0.34rem 0.52rem;
+        font-size: 0.86rem;
+        line-height: 1.10rem;
         font-weight: 700;
         color: var(--text);
         border-radius: 5px 5px 0 0;
-        margin-top: 0.08rem;
+        margin-top: 0.10rem;
     }
 
     .panel-note {
@@ -155,19 +155,19 @@ st.markdown(
     .cell {
         border-right: 1px solid var(--border);
         border-bottom: 1px solid var(--border);
-        padding: 0.28rem 0.40rem;
-        min-height: 43px;
+        padding: 0.34rem 0.46rem;
+        min-height: 47px;
         background: #fff;
     }
 
     .cell-label {
-        font-size: 0.68rem;
+        font-size: 0.72rem;
         color: var(--muted);
         line-height: 0.9rem;
     }
 
     .cell-value {
-        font-size: 0.84rem;
+        font-size: 0.90rem;
         font-weight: 700;
         color: var(--text);
         line-height: 1.05rem;
@@ -235,7 +235,7 @@ st.markdown(
     div[data-testid="stRadio"] label,
     div[data-testid="stTextInput"] label,
     div[data-testid="stToggle"] label {
-        font-size: 0.72rem !important;
+        font-size: 0.76rem !important;
         line-height: 0.90rem !important;
         margin-bottom: 0.05rem !important;
         color: var(--text) !important;
@@ -243,17 +243,17 @@ st.markdown(
 
     div[data-testid="stNumberInput"] input,
     div[data-testid="stTextInput"] input {
-        font-size: 0.75rem !important;
-        min-height: 1.85rem !important;
-        height: 1.85rem !important;
+        font-size: 0.78rem !important;
+        min-height: 2.00rem !important;
+        height: 2.00rem !important;
         padding-top: 0.16rem !important;
         padding-bottom: 0.16rem !important;
         background: var(--input) !important;
     }
 
     div[data-testid="stSelectbox"] > div > div {
-        min-height: 1.85rem !important;
-        font-size: 0.75rem !important;
+        min-height: 2.00rem !important;
+        font-size: 0.78rem !important;
         background: var(--input) !important;
     }
 
@@ -441,10 +441,10 @@ st.markdown(
 
 
 # =============================================================================
-# ROW 1 — SYSTEM / SCHEMATIC / DEMAND
+# PAGE 1 — SYSTEM INPUTS + SCHEMATIC
 # =============================================================================
 
-col_sys, col_scheme, col_demand = st.columns([1.10, 0.95, 0.82], gap="small")
+col_sys, col_scheme = st.columns([1.05, 0.95], gap="medium")
 
 with col_sys:
     section_bar("1 · SYSTEM INPUTS")
@@ -567,44 +567,43 @@ with col_scheme:
         return_mode,
     )
     st.markdown(
-        '<div class="tiny-caption">'
-        "Live values · illustrative schematic"
-        "</div>",
+        '<div class="tiny-caption">Live values · illustrative schematic</div>',
         unsafe_allow_html=True,
     )
 
-with col_demand:
-    section_bar("SYSTEM DEMAND")
-    cell_grid(
-        [
-            ("Design force", f"{fmt(conveyor.design_force_n,0)} N"),
-            ("Force / strand", f"{fmt(conveyor.force_per_strand_n,0)} N"),
-            ("Shaft torque", f"{fmt(conveyor.required_axis_torque_nm,1)} N·m"),
-            ("Power", f"{fmt(conveyor.required_axis_power_kw,2)} kW"),
-            ("Power", f"{fmt(conveyor.required_axis_power_cv,2)} cv"),
-            ("Shaft speed", f"{fmt(conveyor.required_axis_speed_rpm,1)} rpm"),
-            ("Total chain mass", f"{fmt(conveyor.total_chain_mass_kg,1)} kg"),
-            ("Steady resistance", f"{fmt(conveyor.regime_force_n,0)} N"),
-        ],
-        columns=2,
-    )
-    if consider_acceleration:
-        cell_grid(
-            [
-                ("Acceleration", f"{fmt(conveyor.acceleration_m_s2,3)} m/s²"),
-                ("Acceleration force", f"{fmt(conveyor.acceleration_force_n,0)} N"),
-            ],
-            columns=2,
-        )
+# -----------------------------------------------------------------------------
+# SYSTEM DEMAND — FULL WIDTH
+# -----------------------------------------------------------------------------
+
+section_bar("SYSTEM DEMAND")
+
+demand_items = [
+    ("Design force", f"{fmt(conveyor.design_force_n,0)} N"),
+    ("Force / strand", f"{fmt(conveyor.force_per_strand_n,0)} N"),
+    ("Shaft torque", f"{fmt(conveyor.required_axis_torque_nm,1)} N·m"),
+    ("Power", f"{fmt(conveyor.required_axis_power_kw,2)} kW"),
+    ("Power", f"{fmt(conveyor.required_axis_power_cv,2)} cv"),
+    ("Shaft speed", f"{fmt(conveyor.required_axis_speed_rpm,1)} rpm"),
+    ("Total chain mass", f"{fmt(conveyor.total_chain_mass_kg,1)} kg"),
+    ("Steady resistance", f"{fmt(conveyor.regime_force_n,0)} N"),
+]
+
+if consider_acceleration:
+    demand_items += [
+        ("Acceleration", f"{fmt(conveyor.acceleration_m_s2,3)} m/s²"),
+        ("Acceleration force", f"{fmt(conveyor.acceleration_force_n,0)} N"),
+    ]
+
+cell_grid(demand_items, columns=5)
 
 
 # =============================================================================
-# ROW 2 — CONNECTION / PROVIDED DRIVE / COMPARISON
+# PAGE 1.5 — DRIVE CONNECTION
 # =============================================================================
 
-col_conn, col_drive, col_compare = st.columns([0.92, 1.20, 0.90], gap="small")
+col_conn_input, col_conn_img = st.columns([0.72, 1.28], gap="medium")
 
-with col_conn:
+with col_conn_input:
     section_bar("2 · DRIVE CONNECTION")
 
     coupling_mode = st.radio(
@@ -650,16 +649,7 @@ requirement = calculate_secondary_requirement(
     transmission,
 )
 
-with col_conn:
-    render_drive_schematic(
-        IMG_DIRECT if coupling_mode == "Direct" else IMG_REDUCTION,
-        coupling_mode,
-        secondary_dp1 if coupling_mode != "Direct" else None,
-        secondary_dp2 if coupling_mode != "Direct" else None,
-        requirement.required_reducer_speed_rpm,
-        requirement.required_reducer_torque_nm,
-    )
-
+with col_conn_input:
     cell_grid(
         [
             ("Req. reducer speed", f"{fmt(requirement.required_reducer_speed_rpm,1)} rpm"),
@@ -669,6 +659,23 @@ with col_conn:
         columns=1,
     )
 
+with col_conn_img:
+    section_bar("DRIVE SCHEMATIC")
+    render_drive_schematic(
+        IMG_DIRECT if coupling_mode == "Direct" else IMG_REDUCTION,
+        coupling_mode,
+        secondary_dp1 if coupling_mode != "Direct" else None,
+        secondary_dp2 if coupling_mode != "Direct" else None,
+        requirement.required_reducer_speed_rpm,
+        requirement.required_reducer_torque_nm,
+    )
+
+
+# =============================================================================
+# PROVIDED DRIVE + COMPARISON
+# =============================================================================
+
+col_drive, col_compare = st.columns([1.25, 0.75], gap="medium")
 
 with col_drive:
     section_bar("3 · PROVIDED DRIVE")
@@ -725,6 +732,7 @@ with col_drive:
         )
 
     else:
+        section_bar("GEARBOX")
         r1 = st.columns(4)
         with r1[0]:
             reducer_manufacturer = st.text_input("Gearbox mfr.", "Geremia")
@@ -749,6 +757,7 @@ with col_drive:
                 "Max input [kW]", value=1.50, step=0.10
             )
 
+        section_bar("MOTOR")
         r3 = st.columns(4)
         with r3[0]:
             motor_manufacturer = st.text_input("Motor mfr.", "WEG")
@@ -807,14 +816,6 @@ with col_compare:
         final_output.axis_torque_nm, conveyor.required_axis_torque_nm
     )
 
-    compare_html = [
-        '<div class="cell-grid" style="grid-template-columns:1.15fr .85fr .85fr .65fr;">',
-        '<div class="cell"><div class="cell-label">Parameter</div><div class="cell-value">—</div></div>',
-        '<div class="cell"><div class="cell-label">Required</div><div class="cell-value">—</div></div>',
-        '<div class="cell"><div class="cell-label">Available</div><div class="cell-value">—</div></div>',
-        '<div class="cell"><div class="cell-label">Status</div><div class="cell-value">—</div></div>',
-    ]
-
     rows = [
         (
             "Speed",
@@ -852,16 +853,26 @@ with col_compare:
             )
         )
 
+    html = [
+        '<div class="cell-grid" style="grid-template-columns:1.1fr .95fr .95fr .62fr;">'
+    ]
+
+    for label in ("Parameter", "Required", "Available", "Status"):
+        html.append(
+            f'<div class="cell"><div class="cell-label">{label}</div>'
+            f'<div class="cell-value">{label if label=="Parameter" else "—"}</div></div>'
+        )
+
     for label, required, available, status in rows:
-        compare_html += [
-            f'<div class="cell"><div class="cell-label">{label}</div><div class="cell-value">{label}</div></div>',
+        html += [
+            f'<div class="cell"><div class="cell-label">Parameter</div><div class="cell-value">{label}</div></div>',
             f'<div class="cell"><div class="cell-label">Required</div><div class="cell-value">{required}</div></div>',
             f'<div class="cell"><div class="cell-label">Available</div><div class="cell-value">{available}</div></div>',
             f'<div class="cell"><div class="cell-label">Status</div><div class="cell-value">{status_badge(status)}</div></div>',
         ]
 
-    compare_html.append("</div>")
-    st.markdown("".join(compare_html), unsafe_allow_html=True)
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
 
     cell_grid(
         [
