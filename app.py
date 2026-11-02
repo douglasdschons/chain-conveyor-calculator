@@ -297,6 +297,38 @@ st.markdown(
         object-fit: contain !important;
     }
 
+
+    .system-image-box {
+        width: 88%;
+        margin: 0 auto;
+    }
+
+    .system-image-box img {
+        width: 100% !important;
+        height: auto !important;
+        max-height: 320px !important;
+        object-fit: contain !important;
+    }
+
+    .drive-image-box {
+        width: 70%;
+        margin: 0 auto;
+    }
+
+    .drive-image-box img {
+        width: 100% !important;
+        height: auto !important;
+        max-height: 300px !important;
+        object-fit: contain !important;
+    }
+
+    @media (max-width: 900px) {
+        .system-image-box,
+        .drive-image-box {
+            width: 100%;
+        }
+    }
+
     hr {
         margin: 0.38rem 0;
     }
@@ -387,31 +419,14 @@ def render_return_schematic(
     sag_mm: float,
     return_mode: str,
 ) -> None:
-    """Render the return schematic without any text overlay."""
+    """Render the conveyor return schematic as a clean static image."""
     if image is None or not image.exists():
         st.warning("Return schematic image not found in assets/.")
         return
 
-    st.markdown('<div class="system-image-wrap">', unsafe_allow_html=True)
-    st.image(
-        str(image),
-        use_container_width=True,
-    )
+    st.markdown('<div class="system-image-box">', unsafe_allow_html=True)
+    st.image(str(image), use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
-
-    values = [
-        ("C", f"{fmt(center_distance_m, 3)} m"),
-        ("Dp", f"{fmt(pitch_diameter_mm, 0)} mm"),
-        ("F_add", f"{fmt(f_add_n, 0)} N"),
-        ("F_top", f"{fmt(f_top_n, 0)} N"),
-    ]
-
-    if return_mode == "Guided return":
-        values.append(("F_ret", f"{fmt(f_ret_n, 0)} N"))
-    else:
-        values.append(("s", f"{fmt(sag_mm, 0)} mm"))
-
-    cell_grid(values, columns=3)
 
 
 def render_drive_schematic(
@@ -422,32 +437,14 @@ def render_drive_schematic(
     required_speed_rpm: float,
     required_torque_nm: float,
 ) -> None:
-    """Render the drive schematic without text overlay."""
+    """Render the drive schematic as a clean static image."""
     if image is None or not image.exists():
         st.warning("Drive schematic image not found in assets/.")
         return
 
-    st.markdown('<div class="drive-image-wrap">', unsafe_allow_html=True)
-    st.image(
-        str(image),
-        use_container_width=True,
-    )
+    st.markdown('<div class="drive-image-box">', unsafe_allow_html=True)
+    st.image(str(image), use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
-
-    values = [
-        ("Required speed", f"{fmt(required_speed_rpm, 1)} rpm"),
-        ("Required torque", f"{fmt(required_torque_nm, 1)} N·m"),
-    ]
-
-    if connection_mode == "Secondary chain transmission":
-        values.extend(
-            [
-                ("Dp1", f"{fmt(dp1_mm or 0, 0)} mm"),
-                ("Dp2", f"{fmt(dp2_mm or 0, 0)} mm"),
-            ]
-        )
-
-    cell_grid(values, columns=2)
 
 
 # =============================================================================
