@@ -221,19 +221,6 @@ st.markdown(
         object-fit: contain;
     }
 
-    .overlay {
-        position: absolute;
-        transform: translate(-50%, -50%);
-        background: rgba(23,92,211,0.94);
-        color: white;
-        border-radius: 4px;
-        padding: 0.08rem 0.22rem;
-        font-size: clamp(7px, 0.54vw, 10px);
-        font-weight: 700;
-        white-space: nowrap;
-        box-shadow: 0 1px 3px rgba(16,24,40,.15);
-    }
-
     .tiny-caption {
         font-size: 0.84rem;
         color: var(--muted);
@@ -297,6 +284,17 @@ st.markdown(
 
     div[data-testid="stDataFrame"] {
         font-size: 0.80rem;
+    }
+
+
+    .system-image-wrap img {
+        max-height: 285px !important;
+        object-fit: contain !important;
+    }
+
+    .drive-image-wrap img {
+        max-height: 260px !important;
+        object-fit: contain !important;
     }
 
     hr {
@@ -389,32 +387,31 @@ def render_return_schematic(
     sag_mm: float,
     return_mode: str,
 ) -> None:
-    uri = image_data_uri(image)
-    if uri is None:
+    """Render the return schematic without any text overlay."""
+    if image is None or not image.exists():
         st.warning("Return schematic image not found in assets/.")
         return
 
-    overlays = [
-        (f"C={fmt(center_distance_m,3)} m", 50.0, 86.0),
-        (f"Dp={fmt(pitch_diameter_mm,0)} mm", 88.0, 29.0),
-        (f"F_add={fmt(f_add_n,0)} N", 66.0, 20.0),
-        (f"F_top={fmt(f_top_n,0)} N", 66.0, 34.0),
+    st.markdown('<div class="system-image-wrap">', unsafe_allow_html=True)
+    st.image(
+        str(image),
+        use_container_width=True,
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    values = [
+        ("C", f"{fmt(center_distance_m, 3)} m"),
+        ("Dp", f"{fmt(pitch_diameter_mm, 0)} mm"),
+        ("F_add", f"{fmt(f_add_n, 0)} N"),
+        ("F_top", f"{fmt(f_top_n, 0)} N"),
     ]
 
     if return_mode == "Guided return":
-        overlays.append((f"F_ret={fmt(f_ret_n,0)} N", 65.0, 69.0))
+        values.append(("F_ret", f"{fmt(f_ret_n, 0)} N"))
     else:
-        overlays.append((f"s={fmt(sag_mm,0)} mm", 50.0, 68.0))
+        values.append(("s", f"{fmt(sag_mm, 0)} mm"))
 
-    labels = "".join(
-        f'<span class="overlay" style="left:{x}%;top:{y}%;">{txt}</span>'
-        for txt, x, y in overlays
-    )
-
-    st.markdown(
-        f'<div class="schematic system-schematic"><img src="{uri}">{labels}</div>',
-        unsafe_allow_html=True,
-    )
+    cell_grid(values, columns=3)
 
 
 def render_drive_schematic(
@@ -425,31 +422,32 @@ def render_drive_schematic(
     required_speed_rpm: float,
     required_torque_nm: float,
 ) -> None:
-    uri = image_data_uri(image)
-    if uri is None:
+    """Render the drive schematic without text overlay."""
+    if image is None or not image.exists():
         st.warning("Drive schematic image not found in assets/.")
         return
 
-    overlays = [
-        (f"n_req={fmt(required_speed_rpm,1)} rpm", 51.0, 87.0),
-        (f"T_req={fmt(required_torque_nm,1)} N·m", 51.0, 94.0),
+    st.markdown('<div class="drive-image-wrap">', unsafe_allow_html=True)
+    st.image(
+        str(image),
+        use_container_width=True,
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    values = [
+        ("Required speed", f"{fmt(required_speed_rpm, 1)} rpm"),
+        ("Required torque", f"{fmt(required_torque_nm, 1)} N·m"),
     ]
 
     if connection_mode == "Secondary chain transmission":
-        overlays += [
-            (f"Dp1={fmt(dp1_mm or 0,0)} mm", 18.0, 77.0),
-            (f"Dp2={fmt(dp2_mm or 0,0)} mm", 82.0, 24.0),
-        ]
+        values.extend(
+            [
+                ("Dp1", f"{fmt(dp1_mm or 0, 0)} mm"),
+                ("Dp2", f"{fmt(dp2_mm or 0, 0)} mm"),
+            ]
+        )
 
-    labels = "".join(
-        f'<span class="overlay" style="left:{x}%;top:{y}%;">{txt}</span>'
-        for txt, x, y in overlays
-    )
-
-    st.markdown(
-        f'<div class="schematic drive-schematic"><img src="{uri}">{labels}</div>',
-        unsafe_allow_html=True,
-    )
+    cell_grid(values, columns=2)
 
 
 # =============================================================================
