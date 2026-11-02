@@ -115,23 +115,25 @@ st.markdown(
         font-weight: 700 !important;
     }
 
-    .app-note {
-        font-size: 0.86rem;
-        color: var(--muted);
-        margin-bottom: 0.38rem;
-    }
 
     .section-bar {
+        display: block;
+        position: static;
+        clear: both;
+        width: 100%;
+        box-sizing: border-box;
         background: var(--header);
         border: 1px solid var(--border);
-        border-bottom: none;
-        padding: 0.34rem 0.52rem;
+        padding: 0.38rem 0.52rem;
+        margin: 0.55rem 0 0.35rem 0;
         font-size: 0.94rem;
-        line-height: 1.18rem;
+        line-height: 1.20rem;
         font-weight: 700;
         color: var(--text);
-        border-radius: 5px 5px 0 0;
-        margin-top: 0.10rem;
+        border-radius: 5px;
+        overflow: visible;
+        white-space: normal;
+        z-index: auto;
     }
 
     .panel-note {
@@ -188,7 +190,7 @@ st.markdown(
     .status-bad { background: var(--bad-bg); color: var(--bad-fg); }
 
     .schematic {
-        position: relative;
+        position: static;
         width: 100%;
         border: 1px solid var(--border);
         background: #fff;
@@ -230,11 +232,12 @@ st.markdown(
 
     /* Streamlit widgets */
     div[data-testid="stVerticalBlock"] {
-        gap: 0.22rem;
+        gap: 0.32rem;
     }
 
     div[data-testid="stHorizontalBlock"] {
-        gap: 0.42rem;
+        gap: 0.52rem;
+        align-items: flex-start;
     }
 
     div[data-testid="stNumberInput"] label,
@@ -265,8 +268,8 @@ st.markdown(
     }
 
     div[data-testid="stRadio"] {
-        margin-top: -0.10rem;
-        margin-bottom: -0.10rem;
+        margin-top: 0;
+        margin-bottom: 0;
     }
 
     div[data-testid="stRadio"] label {
@@ -452,6 +455,7 @@ def render_drive_schematic(
 # =============================================================================
 
 st.title("Chain Conveyor Calculator")
+st.markdown("<div style=\"height:0.35rem\"></div>", unsafe_allow_html=True)
 st.markdown(
     '<div class="app-note">'
     "System demand · drive selection · required vs available"
