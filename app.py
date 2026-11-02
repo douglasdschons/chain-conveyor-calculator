@@ -29,8 +29,36 @@ st.set_page_config(
 
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "assets"
-GUIDED_RETURN_IMAGE = ASSETS_DIR / "return.png"
-SAG_RETURN_IMAGE = ASSETS_DIR / "sag.png"
+
+
+def find_asset(stem: str) -> Path | None:
+    """Find an asset by filename without extension."""
+    extensions = (".png", ".jpg", ".jpeg", ".webp")
+
+    for ext in extensions:
+        candidate = ASSETS_DIR / f"{stem}{ext}"
+        if candidate.exists():
+            return candidate
+
+    if ASSETS_DIR.exists():
+        wanted = stem.lower()
+        for candidate in ASSETS_DIR.iterdir():
+            if (
+                candidate.is_file()
+                and candidate.stem.lower() == wanted
+                and candidate.suffix.lower() in extensions
+            ):
+                return candidate
+
+    return None
+
+
+GUIDED_RETURN_IMAGE = find_asset("return")
+SAG_RETURN_IMAGE = find_asset("sag")
+DIRECT_IMAGE = find_asset("direct")
+REDUCTION_IMAGE = find_asset("reduction")
+AUXILIARY_PRISM_IMAGE = find_asset("auxiliary prism")
+AUXILIARY_CYLINDER_IMAGE = find_asset("auxiliary cylinder")
 
 
 st.markdown(
@@ -57,7 +85,7 @@ st.markdown(
         }
         .section-title {
             color: #101828;
-            font-size: 1.45rem;
+            font-size: 1.20rem;
             font-weight: 700;
             margin: 0 0 0.65rem 0;
         }
@@ -111,7 +139,7 @@ st.markdown(
         }
         .engineering-card .value {
             color: #101828;
-            font-size: 1.26rem;
+            font-size: 1.02rem;
             font-weight: 700;
         }
         .engineering-card .sub {
@@ -119,6 +147,31 @@ st.markdown(
             font-size: 0.77rem;
             margin-top: 0.15rem;
         }
+        .result-card {
+            border: 1px solid #E4E7EC;
+            border-radius: 9px;
+            padding: 0.68rem 0.78rem;
+            background: #FFFFFF;
+            min-height: 82px;
+            margin-bottom: 0.55rem;
+        }
+
+        .result-card .result-label {
+            color: #475467;
+            font-size: 0.82rem;
+            font-weight: 500;
+            line-height: 1.25;
+            margin-bottom: 0.20rem;
+        }
+
+        .result-card .result-value {
+            color: #101828;
+            font-size: 1.00rem;
+            font-weight: 700;
+            line-height: 1.20;
+            white-space: nowrap;
+        }
+
         div[data-testid="stMetric"] {
             border: 1px solid #E4E7EC;
             padding: 0.76rem 0.86rem;
@@ -175,11 +228,20 @@ def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:,.{decimals}f}"
 
 
-def image_to_data_uri(path: Path) -> str | None:
-    if not path.exists():
+def image_to_data_uri(path: Path | None) -> str | None:
+    if path is None or not path.exists():
         return None
+
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+
+    mime = mime_map.get(path.suffix.lower(), "image/png")
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
+    return f"data:{mime};base64,{encoded}"
 
 
 def status_for_capacity(ratio: float) -> tuple[str, str]:
@@ -201,7 +263,7 @@ def capacity_ratio(available: float, required: float) -> float:
 
 
 def render_schematic(
-    image_path: Path,
+    image_path: Path | None,
     *,
     center_distance_m: float,
     pitch_diameter_mm: float,
@@ -215,10 +277,8 @@ def render_schematic(
     image_uri = image_to_data_uri(image_path)
 
     if image_uri is None:
-        st.warning(
-            f"Image not found: `{image_path.name}`. "
-            f"Place it inside `assets/` next to app.py."
-        )
+        expected = "return.*" if return_mode == "Guided return" else "sag.*"
+        st.warning(f"Image not found: `{expected}` inside `assets/`.")
         return
 
     # Coordinates are percentages of the 16:9 source image.
@@ -258,6 +318,55 @@ def render_schematic(
     )
 
 
+
+
+def render_drive_schematic(
+    image_path: Path | None,
+    *,
+    connection_mode: str,
+    dp1_mm: float | None,
+    dp2_mm: float | None,
+    required_speed_rpm: float,
+    required_torque_nm: float,
+) -> None:
+    """Show direct/reduction image with live engineering values."""
+    image_uri = image_to_data_uri(image_path)
+
+    if image_uri is None:
+        expected = "direct.*" if connection_mode == "Direct" else "reduction.*"
+        st.warning(f"Image not found: `{expected}` inside `assets/`.")
+        return
+
+    overlays = [
+        (f"n_req = {fmt(required_speed_rpm, 1)} rpm", 50.0, 86.0),
+        (f"T_req = {fmt(required_torque_nm, 1)} N·m", 50.0, 94.0),
+    ]
+
+    if connection_mode == "Secondary chain transmission":
+        if dp1_mm is not None:
+            overlays.append((f"Dp1 = {fmt(dp1_mm, 0)} mm", 18.0, 76.0))
+        if dp2_mm is not None:
+            overlays.append((f"Dp2 = {fmt(dp2_mm, 0)} mm", 82.0, 23.0))
+
+    overlay_html = "".join(
+        f'<span class="diagram-value" style="left:{left:.2f}%; top:{top:.2f}%;">{label}</span>'
+        for label, left, top in overlays
+    )
+
+    st.markdown(
+        f"""
+        <div class="schematic-frame">
+            <img src="{image_uri}" alt="Drive connection schematic">
+            {overlay_html}
+        </div>
+        <div class="diagram-caption">
+            Required values are shown on the selected drive arrangement.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 st.title("Chain Conveyor Calculator")
 st.markdown(
     '<div class="app-subtitle">'
@@ -279,9 +388,9 @@ st.markdown(
 system_col, schematic_col = st.columns([1.05, 0.95], gap="large")
 
 with system_col:
-    row1 = st.columns(3)
+    geometry_row = st.columns(3)
 
-    with row1[0]:
+    with geometry_row[0]:
         center_distance_m = st.number_input(
             "Center distance C [m]",
             min_value=0.01,
@@ -289,38 +398,49 @@ with system_col:
             step=0.10,
             help="Distance between the centers of the conveyor sprockets.",
         )
-        strands = st.number_input(
-            "Number of chain strands [-]",
-            min_value=1,
-            value=4,
-            step=1,
-        )
-        chain_mass_per_m = st.number_input(
-            "Chain linear mass [kg/m]",
-            min_value=0.01,
-            value=7.30,
-            step=0.10,
-        )
 
-    with row1[1]:
+    with geometry_row[1]:
         conveyor_dp = st.number_input(
             "Pitch diameter Dp [mm]",
             min_value=1.0,
             value=260.0,
             step=1.0,
         )
-        inclination_deg = st.number_input(
-            "Conveyor inclination α [°]",
-            value=0.0,
-            step=1.0,
+
+    with geometry_row[2]:
+        use_inclination = st.toggle(
+            "Consider conveyor inclination",
+            value=False,
+            help="Enable this option when the conveyor is not horizontal.",
         )
+        if use_inclination:
+            inclination_deg = st.number_input(
+                "Conveyor inclination α [°]",
+                value=0.0,
+                step=1.0,
+            )
+        else:
+            inclination_deg = 0.0
+
+    return_row = st.columns(2)
+
+    with return_row[0]:
         return_mode = st.selectbox(
             "Return type",
             ["Guided return", "Sag return"],
         )
 
-    with row1[2]:
-        if return_mode == "Sag return":
+    with return_row[1]:
+        if return_mode == "Guided return":
+            mu_return = st.number_input(
+                "Return friction coefficient μ_ret [-]",
+                min_value=0.0,
+                value=0.25,
+                step=0.01,
+            )
+            sag_mm = 80.0
+            internal_return_type = "Guiado"
+        else:
             sag_mm = st.number_input(
                 "Return sag s [mm]",
                 min_value=1.0,
@@ -329,54 +449,86 @@ with system_col:
             )
             mu_return = 0.0
             internal_return_type = "Livre"
-        else:
-            sag_mm = 80.0
-            mu_return = st.number_input(
-                "Return friction coefficient μ_ret [-]",
-                min_value=0.0,
-                value=0.25,
-                step=0.01,
-            )
-            internal_return_type = "Guiado"
 
+    chain_row = st.columns(3)
+
+    with chain_row[0]:
+        strands = st.number_input(
+            "Number of chain strands [-]",
+            min_value=1,
+            value=4,
+            step=1,
+        )
+
+    with chain_row[1]:
+        chain_mass_per_m = st.number_input(
+            "Chain linear mass [kg/m]",
+            min_value=0.01,
+            value=7.30,
+            step=0.10,
+        )
+
+    with chain_row[2]:
         mu_top = st.number_input(
             "Top friction coefficient μ_top [-]",
             min_value=0.0,
-            value=0.40,
+            value=0.35,
             step=0.01,
         )
+
+    load_row = st.columns(3)
+
+    with load_row[0]:
         load_mass = st.number_input(
             "Carried load mass [kg]",
             min_value=0.01,
             value=276.0,
             step=10.0,
         )
-
-    row2 = st.columns(4)
-
-    with row2[0]:
-        linear_speed = st.number_input(
-            "Required chain speed [m/min]",
-            min_value=0.01,
-            value=32.0,
-            step=1.0,
+        st.markdown(
+            '<a href="#wood-mass-helper" style="font-size:0.80rem;">'
+            'Open auxiliary mass calculator ↓</a>',
+            unsafe_allow_html=True,
         )
-    with row2[1]:
+
+    with load_row[1]:
         additional_force = st.number_input(
             "Additional force F_add [N]",
             min_value=0.0,
             value=0.0,
             step=10.0,
         )
-    with row2[2]:
-        acceleration_time = st.number_input(
-            "Acceleration time [s]",
-            min_value=0.0,
-            value=3.0,
-            step=0.5,
-            help="Use 0 s to ignore acceleration.",
+
+    with load_row[2]:
+        linear_speed = st.number_input(
+            "Desired chain speed [m/min]",
+            min_value=0.01,
+            value=32.0,
+            step=1.0,
         )
-    with row2[3]:
+
+    design_row = st.columns(3)
+
+    with design_row[0]:
+        consider_acceleration = st.toggle(
+            "Consider acceleration",
+            value=True,
+            help="Enable to include the conveyor acceleration force in the drive demand.",
+        )
+
+    with design_row[1]:
+        if consider_acceleration:
+            acceleration_time = st.number_input(
+                "Acceleration time [s]",
+                min_value=0.01,
+                value=3.0,
+                step=0.5,
+            )
+        else:
+            acceleration_time = 0.0
+            st.caption("Acceleration is not included.")
+
+    with design_row[2]:
         design_factor = st.number_input(
             "Drive design factor [-]",
             min_value=1.0,
@@ -439,23 +591,44 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-demand_cols = st.columns(6)
+demand_row_1 = st.columns(3)
+demand_row_2 = st.columns(3)
 
-demand_cols[0].metric("Design force", f"{fmt(conveyor.design_force_n, 0)} N")
-demand_cols[1].metric("Force per strand", f"{fmt(conveyor.force_per_strand_n, 0)} N")
-demand_cols[2].metric("Required shaft torque", f"{fmt(conveyor.required_axis_torque_nm, 1)} N·m")
-demand_cols[3].metric("Required power", f"{fmt(conveyor.required_axis_power_kw, 2)} kW")
-demand_cols[4].metric("Required power", f"{fmt(conveyor.required_axis_power_cv, 2)} cv")
-demand_cols[5].metric("Required shaft speed", f"{fmt(conveyor.required_axis_speed_rpm, 1)} rpm")
+demand_cards = [
+    (demand_row_1[0], "Design force", f"{fmt(conveyor.design_force_n, 0)} N"),
+    (demand_row_1[1], "Force per strand", f"{fmt(conveyor.force_per_strand_n, 0)} N"),
+    (demand_row_1[2], "Required shaft torque", f"{fmt(conveyor.required_axis_torque_nm, 1)} N·m"),
+    (demand_row_2[0], "Required power", f"{fmt(conveyor.required_axis_power_kw, 2)} kW"),
+    (demand_row_2[1], "Required power", f"{fmt(conveyor.required_axis_power_cv, 2)} cv"),
+    (demand_row_2[2], "Required shaft speed", f"{fmt(conveyor.required_axis_speed_rpm, 1)} rpm"),
+]
+
+for column, label, value in demand_cards:
+    column.markdown(
+        f"""
+        <div class="result-card">
+            <div class="result-label">{label}</div>
+            <div class="result-value">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+secondary_items = [
+    f"Total chain mass: <b>{fmt(conveyor.total_chain_mass_kg, 1)} kg</b>",
+    f"Steady-state resistance: <b>{fmt(conveyor.regime_force_n, 0)} N</b>",
+]
+
+if consider_acceleration:
+    secondary_items.extend(
+        [
+            f"Acceleration: <b>{fmt(conveyor.acceleration_m_s2, 3)} m/s²</b>",
+            f"Acceleration force: <b>{fmt(conveyor.acceleration_force_n, 0)} N</b>",
+        ]
+    )
 
 st.markdown(
-    f"""
-    <div class="soft-note">
-        Total chain mass: <b>{fmt(conveyor.total_chain_mass_kg, 1)} kg</b> ·
-        Steady-state resistance: <b>{fmt(conveyor.regime_force_n, 0)} N</b> ·
-        Moving mass during acceleration: <b>{fmt(conveyor.moving_mass_kg, 1)} kg</b>.
-    </div>
-    """,
+    '<div class="soft-note">' + " · ".join(secondary_items) + "</div>",
     unsafe_allow_html=True,
 )
 
@@ -469,31 +642,32 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-coupling_mode = st.radio(
-    "Drive connection",
-    ["Direct", "Secondary chain transmission"],
-    horizontal=True,
-)
+connection_input_col, connection_image_col = st.columns([0.88, 1.12], gap="large")
 
-if coupling_mode == "Secondary chain transmission":
-    internal_coupling_type = "Transmissão secundária"
-    tr1, tr2, tr3 = st.columns(3)
+with connection_input_col:
+    coupling_mode = st.radio(
+        "Drive connection",
+        ["Direct", "Secondary chain transmission"],
+        horizontal=False,
+    )
 
-    with tr1:
+    if coupling_mode == "Secondary chain transmission":
+        internal_coupling_type = "Transmissão secundária"
+
         secondary_dp1 = st.number_input(
             "Reducer sprocket pitch diameter Dp1 [mm]",
             min_value=1.0,
             value=170.0,
             step=1.0,
         )
-    with tr2:
+
         secondary_dp2 = st.number_input(
             "Conveyor-shaft sprocket pitch diameter Dp2 [mm]",
             min_value=1.0,
             value=202.66,
             step=1.0,
         )
-    with tr3:
+
         secondary_eff = st.number_input(
             "Secondary transmission efficiency η_sec [%]",
             min_value=1.0,
@@ -501,11 +675,12 @@ if coupling_mode == "Secondary chain transmission":
             value=98.0,
             step=0.5,
         )
-else:
-    internal_coupling_type = "Direto"
-    secondary_dp1 = 1.0
-    secondary_dp2 = 1.0
-    secondary_eff = 100.0
+
+    else:
+        internal_coupling_type = "Direto"
+        secondary_dp1 = 1.0
+        secondary_dp2 = 1.0
+        secondary_eff = 100.0
 
 
 transmission = SecondaryTransmissionInput(
@@ -522,10 +697,40 @@ requirement = calculate_secondary_requirement(
     transmission,
 )
 
-req1, req2, req3 = st.columns(3)
-req1.metric("Required reducer output speed", f"{fmt(requirement.required_reducer_speed_rpm, 1)} rpm")
-req2.metric("Required reducer output torque", f"{fmt(requirement.required_reducer_torque_nm, 1)} N·m")
-req3.metric("Required reducer output power", f"{fmt(requirement.required_reducer_power_kw, 2)} kW")
+with connection_input_col:
+    st.markdown("**Required at reducer output**")
+    req1, req2, req3 = st.columns(3)
+
+    result_card_data = [
+        (req1, "Speed", f"{fmt(requirement.required_reducer_speed_rpm, 1)} rpm"),
+        (req2, "Torque", f"{fmt(requirement.required_reducer_torque_nm, 1)} N·m"),
+        (req3, "Power", f"{fmt(requirement.required_reducer_power_kw, 2)} kW"),
+    ]
+
+    for column, label, value in result_card_data:
+        column.markdown(
+            f"""
+            <div class="result-card">
+                <div class="result-label">{label}</div>
+                <div class="result-value">{value}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+with connection_image_col:
+    selected_drive_image = (
+        DIRECT_IMAGE if coupling_mode == "Direct" else REDUCTION_IMAGE
+    )
+
+    render_drive_schematic(
+        selected_drive_image,
+        connection_mode=coupling_mode,
+        dp1_mm=secondary_dp1 if coupling_mode != "Direct" else None,
+        dp2_mm=secondary_dp2 if coupling_mode != "Direct" else None,
+        required_speed_rpm=requirement.required_reducer_speed_rpm,
+        required_torque_nm=requirement.required_reducer_torque_nm,
+    )
 
 
 # STEP 4 ----------------------------------------------------------------------
@@ -785,26 +990,80 @@ with st.expander("Force breakdown and intermediate values"):
     )
 
 
-with st.expander("Wood mass helper"):
-    density = st.number_input("Material density [kg/m³]", min_value=1.0, value=1150.0, step=10.0)
-    mass_col_1, mass_col_2 = st.columns(2)
+st.markdown('<div id="wood-mass-helper"></div>', unsafe_allow_html=True)
 
-    with mass_col_1:
-        st.markdown("**Rectangular block**")
-        base = st.number_input("Base [m]", value=0.40, step=0.01, key="rect_base")
-        height = st.number_input("Height [m]", value=0.20, step=0.01, key="rect_height")
-        length = st.number_input("Length [m]", value=3.00, step=0.10, key="rect_length")
-        volume, mass = rectangular_mass(base, height, length, density)
-        st.write(f"Volume: **{fmt(volume, 3)} m³**")
-        st.write(f"Mass: **{fmt(mass, 1)} kg**")
+with st.expander("Auxiliary carried-mass calculator"):
+    density = st.number_input(
+        "Material density [kg/m³]",
+        min_value=1.0,
+        value=1150.0,
+        step=10.0,
+        key="material_density",
+    )
 
-    with mass_col_2:
-        st.markdown("**Cylindrical log**")
-        diameter = st.number_input("Diameter [m]", value=0.40, step=0.01, key="cyl_diameter")
-        cylinder_length = st.number_input("Length [m]", value=3.00, step=0.10, key="cyl_length")
-        volume, mass = cylindrical_mass(diameter, cylinder_length, density)
-        st.write(f"Volume: **{fmt(volume, 3)} m³**")
-        st.write(f"Mass: **{fmt(mass, 1)} kg**")
+    prism_col, cylinder_col = st.columns(2, gap="large")
+
+    with prism_col:
+        st.markdown("**Rectangular prism**")
+
+        if AUXILIARY_PRISM_IMAGE is not None:
+            st.image(str(AUXILIARY_PRISM_IMAGE), use_container_width=True)
+        else:
+            st.warning("Image not found: `auxiliary prism.*` inside `assets/`.")
+
+        prism_inputs = st.columns(3)
+
+        with prism_inputs[0]:
+            prism_l1 = st.number_input("Length ℓ1 [m]", value=3.00, step=0.10, key="prism_l1")
+        with prism_inputs[1]:
+            prism_l2 = st.number_input("Width ℓ2 [m]", value=0.40, step=0.01, key="prism_l2")
+        with prism_inputs[2]:
+            prism_l3 = st.number_input("Height ℓ3 [m]", value=0.20, step=0.01, key="prism_l3")
+
+        prism_volume, prism_mass = rectangular_mass(
+            prism_l2,
+            prism_l3,
+            prism_l1,
+            density,
+        )
+
+        st.write(f"Volume: **{fmt(prism_volume, 3)} m³**")
+        st.write(f"Mass: **{fmt(prism_mass, 1)} kg**")
+
+    with cylinder_col:
+        st.markdown("**Cylinder / log**")
+
+        if AUXILIARY_CYLINDER_IMAGE is not None:
+            st.image(str(AUXILIARY_CYLINDER_IMAGE), use_container_width=True)
+        else:
+            st.warning("Image not found: `auxiliary cylinder.*` inside `assets/`.")
+
+        cylinder_inputs = st.columns(2)
+
+        with cylinder_inputs[0]:
+            cylinder_diameter = st.number_input(
+                "Diameter Ø [m]",
+                value=0.40,
+                step=0.01,
+                key="cylinder_diameter",
+            )
+
+        with cylinder_inputs[1]:
+            cylinder_l1 = st.number_input(
+                "Length ℓ1 [m]",
+                value=3.00,
+                step=0.10,
+                key="cylinder_l1",
+            )
+
+        cylinder_volume, cylinder_mass = cylindrical_mass(
+            cylinder_diameter,
+            cylinder_l1,
+            density,
+        )
+
+        st.write(f"Volume: **{fmt(cylinder_volume, 3)} m³**")
+        st.write(f"Mass: **{fmt(cylinder_mass, 1)} kg**")
 
 
 # GLOSSARY --------------------------------------------------------------------
@@ -825,6 +1084,8 @@ glossary_rows = [
     {"Variable": "s", "Name": "Sag", "Description": "Vertical sag of the unsupported return strand.", "Unit": "mm", "Shown in schematic": "Sag return only"},
     {"Variable": "μ_top", "Name": "Top friction coefficient", "Description": "Coefficient of friction used for the loaded upper sliding strand.", "Unit": "-", "Shown in schematic": "No"},
     {"Variable": "μ_ret", "Name": "Return friction coefficient", "Description": "Coefficient of friction used for the guided return strand.", "Unit": "-", "Shown in schematic": "No"},
+    {"Variable": "Dp1", "Name": "Reducer sprocket pitch diameter", "Description": "Pitch diameter of the sprocket mounted on the reducer output shaft.", "Unit": "mm", "Shown in schematic": "Reduction only"},
+    {"Variable": "Dp2", "Name": "Conveyor-shaft sprocket pitch diameter", "Description": "Pitch diameter of the driven sprocket mounted on the conveyor shaft.", "Unit": "mm", "Shown in schematic": "Reduction only"},
     {"Variable": "ω", "Name": "Angular velocity", "Description": "Angular velocity of the drive sprocket.", "Unit": "rad/s", "Shown in schematic": "Yes"},
     {"Variable": "α", "Name": "Conveyor inclination", "Description": "Inclination angle of the conveyor relative to horizontal.", "Unit": "°", "Shown in schematic": "No"},
 ]
