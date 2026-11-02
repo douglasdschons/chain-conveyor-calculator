@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import html
+import base64
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -21,30 +22,149 @@ from src.calculations import (
 
 
 st.set_page_config(
-    page_title="Calculadora de Transportador por Correntes",
+    page_title="Chain Conveyor Calculator",
     page_icon="⚙️",
     layout="wide",
 )
 
+BASE_DIR = Path(__file__).resolve().parent
+ASSETS_DIR = BASE_DIR / "assets"
+GUIDED_RETURN_IMAGE = ASSETS_DIR / "return.png"
+SAG_RETURN_IMAGE = ASSETS_DIR / "sag.png"
+
+
 st.markdown(
     """
     <style>
-        .block-container {max-width: 1500px; padding-top: 1.5rem; padding-bottom: 3rem;}
-        h1 {margin-bottom: 0.15rem;}
-        .app-subtitle {color: #667085; margin-bottom: 1.2rem; font-size: 0.98rem;}
-        .section-kicker {color: #667085; font-size: 0.80rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: .1rem;}
-        .section-title {font-size: 1.45rem; font-weight: 700; margin: 0 0 .65rem 0;}
-        .engineering-card {border: 1px solid #E4E7EC; border-radius: 10px; padding: .9rem 1rem; background: #FFFFFF; margin-bottom: .75rem;}
-        .engineering-card .label {color: #667085; font-size: .80rem; margin-bottom: .1rem;}
-        .engineering-card .value {color: #101828; font-size: 1.30rem; font-weight: 700;}
-        .engineering-card .sub {color: #667085; font-size: .78rem; margin-top: .15rem;}
-        .status-ok {color: #067647; background: #ECFDF3; border: 1px solid #ABEFC6; border-radius: 999px; padding: .20rem .55rem; font-weight: 700; font-size: .78rem;}
-        .status-warn {color: #B54708; background: #FFFAEB; border: 1px solid #FEDF89; border-radius: 999px; padding: .20rem .55rem; font-weight: 700; font-size: .78rem;}
-        .status-bad {color: #B42318; background: #FEF3F2; border: 1px solid #FECDCA; border-radius: 999px; padding: .20rem .55rem; font-weight: 700; font-size: .78rem;}
-        .soft-note {background: #F8FAFC; border-left: 4px solid #98A2B3; padding: .75rem .9rem; border-radius: 4px; color: #475467; font-size: .88rem;}
-        div[data-testid="stMetric"] {border: 1px solid #E4E7EC; padding: .8rem .9rem; border-radius: 10px; background: #FFFFFF;}
+        .block-container {
+            max-width: 1550px;
+            padding-top: 1.35rem;
+            padding-bottom: 3rem;
+        }
+        h1 {margin-bottom: 0.10rem;}
+        .app-subtitle {
+            color: #667085;
+            margin-bottom: 1.25rem;
+            font-size: 0.98rem;
+        }
+        .section-kicker {
+            color: #667085;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            margin-bottom: 0.1rem;
+        }
+        .section-title {
+            color: #101828;
+            font-size: 1.45rem;
+            font-weight: 700;
+            margin: 0 0 0.65rem 0;
+        }
+        .soft-note {
+            background: #F8FAFC;
+            border-left: 4px solid #98A2B3;
+            padding: 0.72rem 0.90rem;
+            border-radius: 5px;
+            color: #475467;
+            font-size: 0.88rem;
+            margin-top: 0.55rem;
+        }
+        .status-ok {
+            color: #067647;
+            background: #ECFDF3;
+            border: 1px solid #ABEFC6;
+            border-radius: 999px;
+            padding: 0.18rem 0.52rem;
+            font-weight: 700;
+            font-size: 0.78rem;
+        }
+        .status-warn {
+            color: #B54708;
+            background: #FFFAEB;
+            border: 1px solid #FEDF89;
+            border-radius: 999px;
+            padding: 0.18rem 0.52rem;
+            font-weight: 700;
+            font-size: 0.78rem;
+        }
+        .status-bad {
+            color: #B42318;
+            background: #FEF3F2;
+            border: 1px solid #FECDCA;
+            border-radius: 999px;
+            padding: 0.18rem 0.52rem;
+            font-weight: 700;
+            font-size: 0.78rem;
+        }
+        .engineering-card {
+            border: 1px solid #E4E7EC;
+            border-radius: 10px;
+            padding: 0.85rem 0.95rem;
+            background: #FFFFFF;
+            margin-bottom: 0.65rem;
+        }
+        .engineering-card .label {
+            color: #667085;
+            font-size: 0.78rem;
+            margin-bottom: 0.08rem;
+        }
+        .engineering-card .value {
+            color: #101828;
+            font-size: 1.26rem;
+            font-weight: 700;
+        }
+        .engineering-card .sub {
+            color: #667085;
+            font-size: 0.77rem;
+            margin-top: 0.15rem;
+        }
+        div[data-testid="stMetric"] {
+            border: 1px solid #E4E7EC;
+            padding: 0.76rem 0.86rem;
+            border-radius: 10px;
+            background: #FFFFFF;
+        }
         div[data-testid="stMetricLabel"] {color: #667085;}
-        hr {margin-top: 1.4rem; margin-bottom: 1.4rem;}
+        .schematic-frame {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            overflow: hidden;
+            border: 1px solid #E4E7EC;
+            border-radius: 12px;
+            background: #FFFFFF;
+        }
+        .schematic-frame img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .diagram-value {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            background: rgba(23, 92, 211, 0.93);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.72);
+            border-radius: 6px;
+            padding: 0.16rem 0.38rem;
+            font-size: clamp(9px, 0.85vw, 14px);
+            font-weight: 700;
+            line-height: 1.15;
+            white-space: nowrap;
+            box-shadow: 0 1px 4px rgba(16, 24, 40, 0.16);
+        }
+        .diagram-caption {
+            color: #667085;
+            font-size: 0.77rem;
+            margin-top: 0.28rem;
+        }
+        hr {
+            margin-top: 1.35rem;
+            margin-bottom: 1.35rem;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -52,161 +172,222 @@ st.markdown(
 
 
 def fmt(value: float, decimals: int = 1) -> str:
-    return f"{value:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{value:,.{decimals}f}"
+
+
+def image_to_data_uri(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def status_for_capacity(ratio: float) -> tuple[str, str]:
     if ratio >= 1.20:
         return "OK", "status-ok"
     if ratio >= 1.00:
-        return "ATENÇÃO", "status-warn"
-    return "REPROVADO", "status-bad"
+        return "WARNING", "status-warn"
+    return "FAIL", "status-bad"
 
 
 def status_for_speed(error: float) -> tuple[str, str]:
     if abs(error) <= 0.05:
         return "OK", "status-ok"
-    return "REVER", "status-warn"
+    return "REVIEW", "status-warn"
 
 
-def conveyor_svg(
+def capacity_ratio(available: float, required: float) -> float:
+    return available / required if required > 0 else 0.0
+
+
+def render_schematic(
+    image_path: Path,
+    *,
     center_distance_m: float,
-    strands: int,
-    conveyor_dp_mm: float,
-    return_type: str,
+    pitch_diameter_mm: float,
+    additional_force_n: float,
+    top_friction_n: float,
+    return_friction_n: float,
     sag_mm: float,
-    coupling_type: str,
-    secondary_dp1_mm: float,
-    secondary_dp2_mm: float,
-) -> str:
-    """Desenho esquemático paramétrico; não representa escala CAD."""
-    width, height = 920, 430
-    x1, x2 = 185, 725
-    y_top, y_return = 175, 270
-    r = 48
-    load_x, load_y, load_w, load_h = 335, 92, 250, 58
+    return_mode: str,
+) -> None:
+    """Overlay live calculated values on the static conveyor schematic."""
+    image_uri = image_to_data_uri(image_path)
 
-    n_lines = max(1, min(int(strands), 6))
-    offsets = [0] if n_lines == 1 else [-18 + (36 * i / (n_lines - 1)) for i in range(n_lines)]
-    chain_lines = "".join(
-        f'<line x1="{x1}" y1="{y_top + off}" x2="{x2}" y2="{y_top + off}" stroke="#344054" stroke-width="4" stroke-linecap="round"/>'
-        for off in offsets
+    if image_uri is None:
+        st.warning(
+            f"Image not found: `{image_path.name}`. "
+            f"Place it inside `assets/` next to app.py."
+        )
+        return
+
+    # Coordinates are percentages of the 16:9 source image.
+    # They can be adjusted later if the final English images move the labels.
+    overlays = [
+        (f"C = {fmt(center_distance_m, 3)} m", 50.0, 85.5),
+        (f"Dp = {fmt(pitch_diameter_mm, 0)} mm", 91.0, 28.0),
+        (f"F_add = {fmt(additional_force_n, 0)} N", 65.0, 21.5),
+        (f"F_top = {fmt(top_friction_n, 0)} N", 65.0, 34.5),
+    ]
+
+    if return_mode == "Guided return":
+        overlays.append(
+            (f"F_ret = {fmt(return_friction_n, 0)} N", 64.5, 72.5)
+        )
+    else:
+        overlays.append(
+            (f"s = {fmt(sag_mm, 0)} mm", 50.0, 69.0)
+        )
+
+    overlay_html = "".join(
+        f'<span class="diagram-value" style="left:{left:.2f}%; top:{top:.2f}%;">{text}</span>'
+        for text, left, top in overlays
     )
 
-    if return_type == "Livre":
-        sag_px = max(18, min(65, 18 + sag_mm * 0.20))
-        return_path = (
-            f'<path d="M {x2} {y_return} Q {(x1+x2)/2} {y_return+sag_px} {x1} {y_return}" '
-            'fill="none" stroke="#667085" stroke-width="5" stroke-linecap="round"/>'
-        )
-        return_label = f"Retorno livre · flecha {fmt(sag_mm,0)} mm"
-    else:
-        return_path = (
-            f'<line x1="{x1}" y1="{y_return}" x2="{x2}" y2="{y_return}" stroke="#667085" stroke-width="5" stroke-linecap="round"/>'
-            f'<line x1="{x1+15}" y1="{y_return+12}" x2="{x2-15}" y2="{y_return+12}" stroke="#98A2B3" stroke-width="5" stroke-dasharray="12 8"/>'
-        )
-        return_label = "Retorno guiado"
-
-    if coupling_type == "Direto":
-        drive = f"""
-        <rect x="35" y="128" width="92" height="66" rx="8" fill="#D1E9FF" stroke="#1570EF" stroke-width="2"/>
-        <text x="81" y="153" text-anchor="middle" font-size="14" font-weight="700" fill="#175CD3">MOTOR</text>
-        <text x="81" y="173" text-anchor="middle" font-size="13" fill="#175CD3">+ REDUTOR</text>
-        <line x1="127" y1="161" x2="{x1-r}" y2="{y_top}" stroke="#1570EF" stroke-width="7"/>
-        <text x="80" y="215" text-anchor="middle" font-size="13" fill="#475467">Acionamento direto</text>
-        """
-    else:
-        dp1 = max(18, min(40, secondary_dp1_mm * 0.12))
-        dp2 = max(22, min(52, secondary_dp2_mm * 0.12))
-        gx1, gy1 = 85, 310
-        gx2, gy2 = 185, 310
-        drive = f"""
-        <rect x="24" y="218" width="122" height="58" rx="8" fill="#D1E9FF" stroke="#1570EF" stroke-width="2"/>
-        <text x="85" y="242" text-anchor="middle" font-size="14" font-weight="700" fill="#175CD3">MOTORREDUTOR</text>
-        <text x="85" y="261" text-anchor="middle" font-size="12" fill="#175CD3">ou redutor + motor</text>
-        <circle cx="{gx1}" cy="{gy1}" r="{dp1}" fill="#F2F4F7" stroke="#344054" stroke-width="4"/>
-        <circle cx="{gx2}" cy="{gy2}" r="{dp2}" fill="#F2F4F7" stroke="#344054" stroke-width="4"/>
-        <line x1="{gx1}" y1="{gy1-dp1}" x2="{gx2}" y2="{gy2-dp2}" stroke="#475467" stroke-width="4"/>
-        <line x1="{gx1}" y1="{gy1+dp1}" x2="{gx2}" y2="{gy2+dp2}" stroke="#475467" stroke-width="4"/>
-        <line x1="{gx2}" y1="{gy2-dp2-2}" x2="{x1}" y2="{y_top+r}" stroke="#1570EF" stroke-width="6"/>
-        <text x="{gx1}" y="{gy1+dp1+26}" text-anchor="middle" font-size="12" fill="#475467">Dp1 {fmt(secondary_dp1_mm,0)} mm</text>
-        <text x="{gx2+30}" y="{gy2+dp2+26}" text-anchor="middle" font-size="12" fill="#475467">Dp2 {fmt(secondary_dp2_mm,0)} mm</text>
-        """
-
-    return f"""
-    <svg viewBox="0 0 {width} {height}" width="100%" xmlns="http://www.w3.org/2000/svg" role="img">
-        <rect width="{width}" height="{height}" rx="14" fill="#FCFCFD" stroke="#EAECF0"/>
-        <text x="26" y="35" font-size="17" font-weight="700" fill="#101828">Esquema do transportador</text>
-        <text x="26" y="57" font-size="12" fill="#667085">Representação funcional — não usar como desenho de fabricação</text>
-
-        <rect x="{load_x}" y="{load_y}" width="{load_w}" height="{load_h}" rx="5" fill="#E9D7B7" stroke="#8A5A2B" stroke-width="2"/>
-        <text x="{load_x + load_w/2}" y="{load_y + 34}" text-anchor="middle" font-size="15" font-weight="700" fill="#5D3A1A">MADEIRA</text>
-
-        <circle cx="{x1}" cy="{y_top}" r="{r}" fill="#F2F4F7" stroke="#344054" stroke-width="5"/>
-        <circle cx="{x2}" cy="{y_top}" r="{r}" fill="#F2F4F7" stroke="#344054" stroke-width="5"/>
-        <circle cx="{x1}" cy="{y_top}" r="8" fill="#344054"/>
-        <circle cx="{x2}" cy="{y_top}" r="8" fill="#344054"/>
-        {chain_lines}
-        {return_path}
-        {drive}
-
-        <line x1="{x1}" y1="360" x2="{x2}" y2="360" stroke="#98A2B3" stroke-width="2"/>
-        <line x1="{x1}" y1="350" x2="{x1}" y2="370" stroke="#98A2B3" stroke-width="2"/>
-        <line x1="{x2}" y1="350" x2="{x2}" y2="370" stroke="#98A2B3" stroke-width="2"/>
-        <text x="{(x1+x2)/2}" y="388" text-anchor="middle" font-size="14" font-weight="700" fill="#475467">C = {fmt(center_distance_m,3)} m</text>
-
-        <text x="{x1}" y="113" text-anchor="middle" font-size="13" fill="#475467">Motriz</text>
-        <text x="{x2}" y="113" text-anchor="middle" font-size="13" fill="#475467">Movida</text>
-        <text x="{x2+60}" y="{y_top+5}" font-size="13" fill="#475467">Dp = {fmt(conveyor_dp_mm,0)} mm</text>
-        <text x="{(x1+x2)/2}" y="{y_top+42}" text-anchor="middle" font-size="13" fill="#475467">{strands} vias de corrente</text>
-        <text x="{(x1+x2)/2}" y="{y_return+45}" text-anchor="middle" font-size="13" fill="#475467">{html.escape(return_label)}</text>
-        <polygon points="{x2-35},{y_top-27} {x2-10},{y_top-27} {x2-10},{y_top-37} {x2+12},{y_top-20} {x2-10},{y_top-3} {x2-10},{y_top-13} {x2-35},{y_top-13}" fill="#1570EF"/>
-        <text x="{x2-55}" y="{y_top-42}" text-anchor="end" font-size="12" fill="#1570EF">movimento</text>
-    </svg>
-    """
+    st.markdown(
+        f"""
+        <div class="schematic-frame">
+            <img src="{image_uri}" alt="Chain conveyor schematic">
+            {overlay_html}
+        </div>
+        <div class="diagram-caption">
+            Live calculation values are superimposed on the schematic. The drawing is illustrative and is not a manufacturing drawing.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-st.title("Calculadora de Transportador por Correntes")
+st.title("Chain Conveyor Calculator")
 st.markdown(
-    '<div class="app-subtitle">Dimensionamento do sistema, seleção do acionamento e comparação direta entre o que a esteira exige e o que o conjunto fornece.</div>',
+    '<div class="app-subtitle">'
+    "Engineering sizing of the conveyor, drive selection and direct comparison "
+    "between system demand and available drive capacity."
+    "</div>",
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="section-kicker">Etapa 1</div><div class="section-title">Sistema a dimensionar</div>', unsafe_allow_html=True)
-sys_left, sys_right = st.columns([1.15, 0.85], gap="large")
 
-with sys_left:
+# STEP 1 ----------------------------------------------------------------------
+
+st.markdown(
+    '<div class="section-kicker">Step 1</div>'
+    '<div class="section-title">System to be solved</div>',
+    unsafe_allow_html=True,
+)
+
+system_col, schematic_col = st.columns([1.05, 0.95], gap="large")
+
+with system_col:
     row1 = st.columns(3)
+
     with row1[0]:
-        center_distance_m = st.number_input("Distância entre centros [m]", min_value=0.01, value=4.15554, step=0.10)
-        strands = st.number_input("Quantidade de vias", min_value=1, value=4, step=1)
-        chain_mass_per_m = st.number_input("Massa linear da corrente [kg/m]", min_value=0.01, value=7.30, step=0.10)
+        center_distance_m = st.number_input(
+            "Center distance C [m]",
+            min_value=0.01,
+            value=4.15554,
+            step=0.10,
+            help="Distance between the centers of the conveyor sprockets.",
+        )
+        strands = st.number_input(
+            "Number of chain strands [-]",
+            min_value=1,
+            value=4,
+            step=1,
+        )
+        chain_mass_per_m = st.number_input(
+            "Chain linear mass [kg/m]",
+            min_value=0.01,
+            value=7.30,
+            step=0.10,
+        )
+
     with row1[1]:
-        conveyor_dp = st.number_input("Ø primitivo das rodas [mm]", min_value=1.0, value=260.0, step=1.0)
-        inclination_deg = st.number_input("Inclinação [°]", value=0.0, step=1.0)
-        return_type = st.selectbox("Tipo de retorno", ["Guiado", "Livre"])
+        conveyor_dp = st.number_input(
+            "Pitch diameter Dp [mm]",
+            min_value=1.0,
+            value=260.0,
+            step=1.0,
+        )
+        inclination_deg = st.number_input(
+            "Conveyor inclination α [°]",
+            value=0.0,
+            step=1.0,
+        )
+        return_mode = st.selectbox(
+            "Return type",
+            ["Guided return", "Sag return"],
+        )
+
     with row1[2]:
-        if return_type == "Livre":
-            return_sag_mm = st.number_input("Flecha do retorno [mm]", min_value=1.0, value=80.0, step=5.0)
+        if return_mode == "Sag return":
+            sag_mm = st.number_input(
+                "Return sag s [mm]",
+                min_value=1.0,
+                value=80.0,
+                step=5.0,
+            )
             mu_return = 0.0
+            internal_return_type = "Livre"
         else:
-            return_sag_mm = 80.0
-            mu_return = st.number_input("Atrito do retorno μret", min_value=0.0, value=0.25, step=0.01)
-        mu_top = st.number_input("Atrito superior μsup", min_value=0.0, value=0.40, step=0.01)
-        load_mass = st.number_input("Massa transportada [kg]", min_value=0.01, value=276.0, step=10.0)
+            sag_mm = 80.0
+            mu_return = st.number_input(
+                "Return friction coefficient μ_ret [-]",
+                min_value=0.0,
+                value=0.25,
+                step=0.01,
+            )
+            internal_return_type = "Guiado"
+
+        mu_top = st.number_input(
+            "Top friction coefficient μ_top [-]",
+            min_value=0.0,
+            value=0.40,
+            step=0.01,
+        )
+        load_mass = st.number_input(
+            "Carried load mass [kg]",
+            min_value=0.01,
+            value=276.0,
+            step=10.0,
+        )
 
     row2 = st.columns(4)
+
     with row2[0]:
-        linear_speed = st.number_input("Velocidade desejada [m/min]", min_value=0.01, value=32.0, step=1.0)
+        linear_speed = st.number_input(
+            "Required chain speed [m/min]",
+            min_value=0.01,
+            value=32.0,
+            step=1.0,
+        )
     with row2[1]:
-        additional_force = st.number_input("Força adicional [N]", min_value=0.0, value=0.0, step=10.0)
+        additional_force = st.number_input(
+            "Additional force F_add [N]",
+            min_value=0.0,
+            value=0.0,
+            step=10.0,
+        )
     with row2[2]:
-        acceleration_time = st.number_input("Tempo de aceleração [s]", min_value=0.0, value=3.0, step=0.5, help="Use 0 para ignorar a aceleração.")
+        acceleration_time = st.number_input(
+            "Acceleration time [s]",
+            min_value=0.0,
+            value=3.0,
+            step=0.5,
+            help="Use 0 s to ignore acceleration.",
+        )
     with row2[3]:
         design_factor = st.number_input(
-            "Fator de projeto do acionamento", min_value=1.0, value=1.50, step=0.05,
-            help="Margem aplicada ao requisito calculado de força, torque e potência. Não é o fator de segurança estrutural da corrente.",
+            "Drive design factor [-]",
+            min_value=1.0,
+            value=1.50,
+            step=0.05,
+            help=(
+                "Margin applied to calculated drive force, torque and power demand. "
+                "This is not the chain breaking-load safety factor."
+            ),
         )
+
 
 conveyor = calculate_conveyor(
     ConveyorInput(
@@ -215,8 +396,8 @@ conveyor = calculate_conveyor(
         chain_mass_per_m_kg=chain_mass_per_m,
         inclination_deg=inclination_deg,
         conveyor_sprocket_pitch_diameter_mm=conveyor_dp,
-        return_type=return_type,
-        return_sag_mm=return_sag_mm,
+        return_type=internal_return_type,
+        return_sag_mm=sag_mm,
         mu_top=mu_top,
         mu_return=mu_return,
         load_mass_kg=load_mass,
@@ -227,29 +408,108 @@ conveyor = calculate_conveyor(
     )
 )
 
-with sys_right:
-    st.markdown("**Arquitetura do acionamento**")
-    coupling_type = st.radio("Ligação ao eixo da esteira", ["Direto", "Transmissão secundária"], horizontal=True, label_visibility="collapsed")
-    if coupling_type == "Transmissão secundária":
-        s1, s2, s3 = st.columns(3)
-        with s1:
-            secondary_dp1 = st.number_input("Dp1 redutor [mm]", min_value=1.0, value=170.0, step=1.0)
-        with s2:
-            secondary_dp2 = st.number_input("Dp2 eixo [mm]", min_value=1.0, value=202.66, step=1.0)
-        with s3:
-            secondary_eff = st.number_input("η secundária [%]", min_value=1.0, max_value=100.0, value=98.0, step=0.5)
-    else:
-        secondary_dp1 = 1.0
-        secondary_dp2 = 1.0
-        secondary_eff = 100.0
 
-    st.markdown(
-        conveyor_svg(center_distance_m, int(strands), conveyor_dp, return_type, return_sag_mm, coupling_type, secondary_dp1, secondary_dp2),
-        unsafe_allow_html=True,
+with schematic_col:
+    st.markdown("#### Conveyor schematic")
+
+    selected_image = (
+        GUIDED_RETURN_IMAGE
+        if return_mode == "Guided return"
+        else SAG_RETURN_IMAGE
     )
 
+    render_schematic(
+        selected_image,
+        center_distance_m=center_distance_m,
+        pitch_diameter_mm=conveyor_dp,
+        additional_force_n=additional_force,
+        top_friction_n=conveyor.top_friction_n,
+        return_friction_n=conveyor.return_friction_n,
+        sag_mm=sag_mm,
+        return_mode=return_mode,
+    )
+
+
+# STEP 2 ----------------------------------------------------------------------
+
+st.divider()
+st.markdown(
+    '<div class="section-kicker">Step 2</div>'
+    '<div class="section-title">System demand</div>',
+    unsafe_allow_html=True,
+)
+
+demand_cols = st.columns(6)
+
+demand_cols[0].metric("Design force", f"{fmt(conveyor.design_force_n, 0)} N")
+demand_cols[1].metric("Force per strand", f"{fmt(conveyor.force_per_strand_n, 0)} N")
+demand_cols[2].metric("Required shaft torque", f"{fmt(conveyor.required_axis_torque_nm, 1)} N·m")
+demand_cols[3].metric("Required power", f"{fmt(conveyor.required_axis_power_kw, 2)} kW")
+demand_cols[4].metric("Required power", f"{fmt(conveyor.required_axis_power_cv, 2)} cv")
+demand_cols[5].metric("Required shaft speed", f"{fmt(conveyor.required_axis_speed_rpm, 1)} rpm")
+
+st.markdown(
+    f"""
+    <div class="soft-note">
+        Total chain mass: <b>{fmt(conveyor.total_chain_mass_kg, 1)} kg</b> ·
+        Steady-state resistance: <b>{fmt(conveyor.regime_force_n, 0)} N</b> ·
+        Moving mass during acceleration: <b>{fmt(conveyor.moving_mass_kg, 1)} kg</b>.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# STEP 3 ----------------------------------------------------------------------
+
+st.divider()
+st.markdown(
+    '<div class="section-kicker">Step 3</div>'
+    '<div class="section-title">Connection between drive and conveyor shaft</div>',
+    unsafe_allow_html=True,
+)
+
+coupling_mode = st.radio(
+    "Drive connection",
+    ["Direct", "Secondary chain transmission"],
+    horizontal=True,
+)
+
+if coupling_mode == "Secondary chain transmission":
+    internal_coupling_type = "Transmissão secundária"
+    tr1, tr2, tr3 = st.columns(3)
+
+    with tr1:
+        secondary_dp1 = st.number_input(
+            "Reducer sprocket pitch diameter Dp1 [mm]",
+            min_value=1.0,
+            value=170.0,
+            step=1.0,
+        )
+    with tr2:
+        secondary_dp2 = st.number_input(
+            "Conveyor-shaft sprocket pitch diameter Dp2 [mm]",
+            min_value=1.0,
+            value=202.66,
+            step=1.0,
+        )
+    with tr3:
+        secondary_eff = st.number_input(
+            "Secondary transmission efficiency η_sec [%]",
+            min_value=1.0,
+            max_value=100.0,
+            value=98.0,
+            step=0.5,
+        )
+else:
+    internal_coupling_type = "Direto"
+    secondary_dp1 = 1.0
+    secondary_dp2 = 1.0
+    secondary_eff = 100.0
+
+
 transmission = SecondaryTransmissionInput(
-    coupling_type=coupling_type,
+    coupling_type=internal_coupling_type,
     reducer_sprocket_pitch_diameter_mm=secondary_dp1,
     shaft_sprocket_pitch_diameter_mm=secondary_dp2,
     efficiency_pct=secondary_eff,
@@ -262,45 +522,53 @@ requirement = calculate_secondary_requirement(
     transmission,
 )
 
-st.divider()
-st.markdown('<div class="section-kicker">Etapa 2</div><div class="section-title">O que o sistema exige</div>', unsafe_allow_html=True)
-req_cols = st.columns(6)
-req_cols[0].metric("Força de projeto", f"{fmt(conveyor.design_force_n,0)} N")
-req_cols[1].metric("Força por via", f"{fmt(conveyor.force_per_strand_n,0)} N")
-req_cols[2].metric("Torque no eixo", f"{fmt(conveyor.required_axis_torque_nm,1)} N·m")
-req_cols[3].metric("Potência", f"{fmt(conveyor.required_axis_power_kw,2)} kW")
-req_cols[4].metric("Potência comercial", f"{fmt(conveyor.required_axis_power_cv,2)} cv")
-req_cols[5].metric("Rotação do eixo", f"{fmt(conveyor.required_axis_speed_rpm,1)} rpm")
+req1, req2, req3 = st.columns(3)
+req1.metric("Required reducer output speed", f"{fmt(requirement.required_reducer_speed_rpm, 1)} rpm")
+req2.metric("Required reducer output torque", f"{fmt(requirement.required_reducer_torque_nm, 1)} N·m")
+req3.metric("Required reducer output power", f"{fmt(requirement.required_reducer_power_kw, 2)} kW")
 
+
+# STEP 4 ----------------------------------------------------------------------
+
+st.divider()
 st.markdown(
-    f'<div class="soft-note">Massa total das correntes: <b>{fmt(conveyor.total_chain_mass_kg,1)} kg</b> · '
-    f'Força resistente em regime: <b>{fmt(conveyor.regime_force_n,0)} N</b> · '
-    f'Requisito na saída do redutor: <b>{fmt(requirement.required_reducer_speed_rpm,1)} rpm</b>, '
-    f'<b>{fmt(requirement.required_reducer_torque_nm,1)} N·m</b> e <b>{fmt(requirement.required_reducer_power_kw,2)} kW</b>.</div>',
+    '<div class="section-kicker">Step 4</div>'
+    '<div class="section-title">Provided drive</div>',
     unsafe_allow_html=True,
 )
 
-st.divider()
-st.markdown('<div class="section-kicker">Etapa 3</div><div class="section-title">Acionamento fornecido</div>', unsafe_allow_html=True)
-supply_mode = st.radio("Como o acionamento será informado?", ["Motoredutor completo", "Redutor + motor separados"], horizontal=True)
-drive_input_col, drive_summary_col = st.columns([1.25, 0.75], gap="large")
+supply_mode = st.radio(
+    "How will the drive be specified?",
+    ["Complete gearmotor", "Separate gearbox + motor"],
+    horizontal=True,
+)
+
+drive_input_col, drive_output_col = st.columns([1.20, 0.80], gap="large")
 
 with drive_input_col:
-    if supply_mode == "Motoredutor completo":
-        st.markdown("#### Motoredutor completo")
-        st.caption("Use diretamente os dados de saída do fabricante do conjunto, como nos configuradores SEW, NORD ou Bonfiglioli.")
-        a, b = st.columns(2)
-        with a:
-            gm_manufacturer = st.text_input("Fabricante", value="SEW-EURODRIVE")
-            gm_model = st.text_input("Modelo / designação", value="")
-            gm_motor_power = st.number_input("Potência do motor [kW]", value=15.0, step=0.5)
-            gm_motor_speed = st.number_input("Rotação nominal do motor [rpm]", value=1777.0, step=1.0)
-            gm_ratio = st.number_input("Redução total", value=22.37, step=0.01)
-        with b:
-            gm_output_speed = st.number_input("Velocidade de saída [rpm]", value=79.0, step=1.0)
-            gm_output_torque = st.number_input("Torque de saída [N·m]", value=1790.0, step=10.0)
-            gm_radial = st.number_input("Força radial admissível [N]", value=15600.0, step=100.0)
-            gm_service_factor = st.number_input("Fator de serviço do fabricante", value=1.50, step=0.05, help="Dado comercial do fabricante; não substituir pelo fator de projeto da aplicação.")
+    if supply_mode == "Complete gearmotor":
+        st.markdown("#### Complete gearmotor")
+        st.caption("Enter the certified output data supplied by the gearmotor manufacturer.")
+
+        gm_a, gm_b = st.columns(2)
+
+        with gm_a:
+            gm_manufacturer = st.text_input("Manufacturer", value="SEW-EURODRIVE")
+            gm_model = st.text_input("Model / designation", value="")
+            gm_motor_power = st.number_input("Motor rated power [kW]", value=15.0, step=0.5)
+            gm_motor_speed = st.number_input("Motor rated speed [rpm]", value=1777.0, step=1.0)
+            gm_ratio = st.number_input("Total gear ratio [-]", value=22.37, step=0.01)
+
+        with gm_b:
+            gm_output_speed = st.number_input("Output speed [rpm]", value=79.0, step=1.0)
+            gm_output_torque = st.number_input("Output torque [N·m]", value=1790.0, step=10.0)
+            gm_radial = st.number_input("Admissible output radial force [N]", value=15600.0, step=100.0)
+            gm_service_factor = st.number_input(
+                "Manufacturer service factor [-]",
+                value=1.50,
+                step=0.05,
+                help="Manufacturer-specific factor. Do not replace the application design factor with this value.",
+            )
 
         drive = complete_gearmotor_output(
             CompleteGearmotorInput(
@@ -315,30 +583,35 @@ with drive_input_col:
                 manufacturer_service_factor=gm_service_factor,
             )
         )
+
     else:
-        st.markdown("#### Redutor")
-        r1, r2 = st.columns(2)
-        with r1:
-            reducer_manufacturer = st.text_input("Fabricante do redutor", value="Geremia")
-            reducer_model = st.text_input("Modelo do redutor", value="GD30/2R")
-            reducer_ratio = st.number_input("Redução do redutor", value=35.0, step=0.01)
-            reducer_eff = st.number_input("Rendimento do redutor [%]", value=96.0, step=0.5)
-        with r2:
-            reducer_max_torque = st.number_input("Torque máximo [N·m]", value=370.0, step=10.0)
-            reducer_radial = st.number_input("Força radial admissível [N]", value=6300.0, step=100.0)
-            reducer_max_power = st.number_input("Potência máxima de entrada [kW]", value=1.50, step=0.10)
+        st.markdown("#### Gearbox")
+        gb_a, gb_b = st.columns(2)
+
+        with gb_a:
+            reducer_manufacturer = st.text_input("Gearbox manufacturer", value="Geremia")
+            reducer_model = st.text_input("Gearbox model", value="GD30/2R")
+            reducer_ratio = st.number_input("Gear ratio [-]", value=35.0, step=0.01)
+            reducer_eff = st.number_input("Gearbox efficiency [%]", value=96.0, step=0.5)
+
+        with gb_b:
+            reducer_max_torque = st.number_input("Maximum output torque [N·m]", value=370.0, step=10.0)
+            reducer_radial = st.number_input("Admissible output radial force [N]", value=6300.0, step=100.0)
+            reducer_max_power = st.number_input("Maximum input power [kW]", value=1.50, step=0.10)
 
         st.markdown("#### Motor")
-        m1, m2 = st.columns(2)
-        with m1:
-            motor_manufacturer = st.text_input("Fabricante do motor", value="WEG")
-            motor_model = st.text_input("Modelo do motor", value="")
-            motor_power = st.number_input("Potência nominal [kW]", value=1.50, step=0.10)
-            motor_speed = st.number_input("Rotação nominal [rpm]", value=1745.0, step=1.0)
-        with m2:
-            motor_eff = st.number_input("Rendimento do motor [%]", value=86.5, step=0.1)
-            nominal_freq = st.number_input("Frequência nominal [Hz]", value=60.0, step=1.0)
-            operating_freq = st.number_input("Frequência de operação [Hz]", value=60.0, step=1.0)
+        motor_a, motor_b = st.columns(2)
+
+        with motor_a:
+            motor_manufacturer = st.text_input("Motor manufacturer", value="WEG")
+            motor_model = st.text_input("Motor model", value="")
+            motor_power = st.number_input("Motor rated power [kW]", value=1.50, step=0.10)
+            motor_speed = st.number_input("Motor rated speed [rpm]", value=1745.0, step=1.0)
+
+        with motor_b:
+            motor_eff = st.number_input("Motor efficiency [%]", value=86.5, step=0.1)
+            nominal_freq = st.number_input("Rated frequency [Hz]", value=60.0, step=1.0)
+            operating_freq = st.number_input("Operating frequency [Hz]", value=60.0, step=1.0)
 
         drive = separate_drive_output(
             SeparateDriveInput(
@@ -359,94 +632,219 @@ with drive_input_col:
             )
         )
 
+
 final_output = calculate_final_output(drive, transmission, conveyor_dp)
 
-with drive_summary_col:
-    st.markdown("#### O que estou fornecendo")
-    st.metric("Velocidade linear disponível", f"{fmt(final_output.linear_speed_m_min,1)} m/min")
-    st.metric("Torque disponível no eixo", f"{fmt(final_output.axis_torque_nm,1)} N·m")
-    st.metric("Potência disponível no eixo", f"{fmt(final_output.axis_power_kw,2)} kW")
-    st.metric("Rotação disponível no eixo", f"{fmt(final_output.axis_speed_rpm,1)} rpm")
-    if coupling_type == "Transmissão secundária":
-        st.markdown("##### Transmissão secundária")
-        st.metric("Força tangencial na roda do redutor", f"{fmt(final_output.radial_tangential_force_n or 0,0)} N")
-        st.metric("Força radial admissível", f"{fmt(drive.admissible_radial_force_n,0)} N")
+with drive_output_col:
+    st.markdown("#### Available at conveyor shaft")
+    st.metric("Available linear speed", f"{fmt(final_output.linear_speed_m_min, 1)} m/min")
+    st.metric("Available shaft torque", f"{fmt(final_output.axis_torque_nm, 1)} N·m")
+    st.metric("Available shaft power", f"{fmt(final_output.axis_power_kw, 2)} kW")
+    st.metric("Available shaft speed", f"{fmt(final_output.axis_speed_rpm, 1)} rpm")
+
+    if coupling_mode == "Secondary chain transmission":
+        st.markdown("##### Secondary transmission check")
+        radial_force = final_output.radial_tangential_force_n or 0.0
+        st.metric("Tangential force at reducer sprocket", f"{fmt(radial_force, 0)} N")
+        st.metric("Admissible reducer radial force", f"{fmt(drive.admissible_radial_force_n, 0)} N")
+
         if final_output.critical_pitch_diameter_mm is not None:
-            st.metric("Ø primitivo crítico teórico", f"{fmt(final_output.critical_pitch_diameter_mm,1)} mm")
-        st.caption("O Ø crítico é um limite teórico sem fator de segurança; não é um diâmetro recomendado.")
+            st.metric("Theoretical critical pitch diameter", f"{fmt(final_output.critical_pitch_diameter_mm, 1)} mm")
+
+        st.caption(
+            "The critical pitch diameter is a theoretical limit with no additional safety factor. "
+            "It is not a recommended sprocket diameter."
+        )
+
+
+# STEP 5 ----------------------------------------------------------------------
 
 st.divider()
-st.markdown('<div class="section-kicker">Etapa 4</div><div class="section-title">Requerido × disponível</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="section-kicker">Step 5</div>'
+    '<div class="section-title">Required vs available</div>',
+    unsafe_allow_html=True,
+)
 
-
-def capacity_ratio(available: float, required: float) -> float:
-    return available / required if required > 0 else 0.0
-
-
-speed_error = (final_output.linear_speed_m_min - linear_speed) / linear_speed if linear_speed > 0 else 0.0
+speed_error = (
+    (final_output.linear_speed_m_min - linear_speed) / linear_speed
+    if linear_speed > 0
+    else 0.0
+)
 power_ratio = capacity_ratio(final_output.axis_power_kw, conveyor.required_axis_power_kw)
 torque_ratio = capacity_ratio(final_output.axis_torque_nm, conveyor.required_axis_torque_nm)
+
 speed_status, speed_class = status_for_speed(speed_error)
 power_status, power_class = status_for_capacity(power_ratio)
 torque_status, torque_class = status_for_capacity(torque_ratio)
 
 comparison_rows = [
-    {"Grandeza": "Velocidade linear", "Requerido": round(linear_speed, 2), "Disponível": round(final_output.linear_speed_m_min, 2), "Unidade": "m/min", "Margem / desvio": f"{speed_error*100:+.1f}%", "Status": speed_status},
-    {"Grandeza": "Potência", "Requerido": round(conveyor.required_axis_power_kw, 3), "Disponível": round(final_output.axis_power_kw, 3), "Unidade": "kW", "Margem / desvio": f"{power_ratio:.2f}x", "Status": power_status},
-    {"Grandeza": "Torque", "Requerido": round(conveyor.required_axis_torque_nm, 2), "Disponível": round(final_output.axis_torque_nm, 2), "Unidade": "N·m", "Margem / desvio": f"{torque_ratio:.2f}x", "Status": torque_status},
+    {
+        "Parameter": "Linear speed",
+        "Required": round(linear_speed, 2),
+        "Available": round(final_output.linear_speed_m_min, 2),
+        "Unit": "m/min",
+        "Margin / deviation": f"{speed_error * 100:+.1f}%",
+        "Status": speed_status,
+    },
+    {
+        "Parameter": "Power",
+        "Required": round(conveyor.required_axis_power_kw, 3),
+        "Available": round(final_output.axis_power_kw, 3),
+        "Unit": "kW",
+        "Margin / deviation": f"{power_ratio:.2f}x",
+        "Status": power_status,
+    },
+    {
+        "Parameter": "Torque",
+        "Required": round(conveyor.required_axis_torque_nm, 2),
+        "Available": round(final_output.axis_torque_nm, 2),
+        "Unit": "N·m",
+        "Margin / deviation": f"{torque_ratio:.2f}x",
+        "Status": torque_status,
+    },
 ]
 
 radial_status = None
 radial_class = None
-if coupling_type == "Transmissão secundária":
+
+if coupling_mode == "Secondary chain transmission":
     radial_force = final_output.radial_tangential_force_n or 0.0
     radial_ratio = capacity_ratio(drive.admissible_radial_force_n, radial_force)
-    radial_status = "OK" if radial_ratio >= 1.0 else "REPROVADO"
+    radial_status = "OK" if radial_ratio >= 1.0 else "FAIL"
     radial_class = "status-ok" if radial_ratio >= 1.0 else "status-bad"
-    comparison_rows.append({"Grandeza": "Força radial / tangencial", "Requerido": round(radial_force, 1), "Disponível": round(drive.admissible_radial_force_n, 1), "Unidade": "N", "Margem / desvio": f"{radial_ratio:.2f}x", "Status": radial_status})
 
-summary_cols = st.columns(4 if coupling_type == "Transmissão secundária" else 3)
-summary_cols[0].markdown(f'<div class="engineering-card"><div class="label">Velocidade</div><div class="value">{fmt(linear_speed,1)} → {fmt(final_output.linear_speed_m_min,1)} m/min</div><div class="sub"><span class="{speed_class}">{speed_status}</span></div></div>', unsafe_allow_html=True)
-summary_cols[1].markdown(f'<div class="engineering-card"><div class="label">Potência</div><div class="value">{fmt(conveyor.required_axis_power_kw,2)} → {fmt(final_output.axis_power_kw,2)} kW</div><div class="sub"><span class="{power_class}">{power_status}</span></div></div>', unsafe_allow_html=True)
-summary_cols[2].markdown(f'<div class="engineering-card"><div class="label">Torque</div><div class="value">{fmt(conveyor.required_axis_torque_nm,1)} → {fmt(final_output.axis_torque_nm,1)} N·m</div><div class="sub"><span class="{torque_class}">{torque_status}</span></div></div>', unsafe_allow_html=True)
-if coupling_type == "Transmissão secundária":
+    comparison_rows.append(
+        {
+            "Parameter": "Reducer radial / tangential load",
+            "Required": round(radial_force, 1),
+            "Available": round(drive.admissible_radial_force_n, 1),
+            "Unit": "N",
+            "Margin / deviation": f"{radial_ratio:.2f}x",
+            "Status": radial_status,
+        }
+    )
+
+summary_cols = st.columns(4 if coupling_mode == "Secondary chain transmission" else 3)
+
+summary_cols[0].markdown(
+    f'<div class="engineering-card"><div class="label">Linear speed</div>'
+    f'<div class="value">{fmt(linear_speed, 1)} → {fmt(final_output.linear_speed_m_min, 1)} m/min</div>'
+    f'<div class="sub"><span class="{speed_class}">{speed_status}</span></div></div>',
+    unsafe_allow_html=True,
+)
+summary_cols[1].markdown(
+    f'<div class="engineering-card"><div class="label">Power</div>'
+    f'<div class="value">{fmt(conveyor.required_axis_power_kw, 2)} → {fmt(final_output.axis_power_kw, 2)} kW</div>'
+    f'<div class="sub"><span class="{power_class}">{power_status}</span></div></div>',
+    unsafe_allow_html=True,
+)
+summary_cols[2].markdown(
+    f'<div class="engineering-card"><div class="label">Torque</div>'
+    f'<div class="value">{fmt(conveyor.required_axis_torque_nm, 1)} → {fmt(final_output.axis_torque_nm, 1)} N·m</div>'
+    f'<div class="sub"><span class="{torque_class}">{torque_status}</span></div></div>',
+    unsafe_allow_html=True,
+)
+
+if coupling_mode == "Secondary chain transmission":
     radial_force = final_output.radial_tangential_force_n or 0.0
-    summary_cols[3].markdown(f'<div class="engineering-card"><div class="label">Carga no eixo do redutor</div><div class="value">{fmt(radial_force,0)} → {fmt(drive.admissible_radial_force_n,0)} N</div><div class="sub"><span class="{radial_class}">{radial_status}</span></div></div>', unsafe_allow_html=True)
+    summary_cols[3].markdown(
+        f'<div class="engineering-card"><div class="label">Reducer radial load</div>'
+        f'<div class="value">{fmt(radial_force, 0)} → {fmt(drive.admissible_radial_force_n, 0)} N</div>'
+        f'<div class="sub"><span class="{radial_class}">{radial_status}</span></div></div>',
+        unsafe_allow_html=True,
+    )
 
-st.dataframe(pd.DataFrame(comparison_rows), hide_index=True, use_container_width=True)
-st.markdown('<div class="soft-note"><b>Hipótese de distribuição entre vias:</b> a força por via pressupõe correntes com comprimentos compatíveis, rodas dentadas sincronizadas no eixo, guias niveladas, tensionamento equivalente e desgaste semelhante entre as vias.</div>', unsafe_allow_html=True)
+st.dataframe(
+    pd.DataFrame(comparison_rows),
+    hide_index=True,
+    use_container_width=True,
+)
 
-with st.expander("Detalhes das forças e memória intermediária"):
+
+# DETAILS ---------------------------------------------------------------------
+
+with st.expander("Force breakdown and intermediate values"):
     force_rows = [
-        ("Atrito — ramo superior", conveyor.top_friction_n, "N"),
-        ("Inclinação da carga", conveyor.inclination_force_n, "N"),
-        ("Aceleração", conveyor.acceleration_force_n, "N"),
-        ("Força resistente em regime", conveyor.regime_force_n, "N"),
-        ("Força total antes do fator de projeto", conveyor.force_before_design_factor_n, "N"),
+        ("Top friction force F_top", conveyor.top_friction_n, "N"),
+        ("Load inclination force", conveyor.inclination_force_n, "N"),
+        ("Acceleration force", conveyor.acceleration_force_n, "N"),
+        ("Steady-state resistance", conveyor.regime_force_n, "N"),
+        ("Force before drive design factor", conveyor.force_before_design_factor_n, "N"),
     ]
-    if return_type == "Guiado":
-        force_rows.insert(1, ("Atrito — retorno", conveyor.return_friction_n, "N"))
+
+    if return_mode == "Guided return":
+        force_rows.insert(1, ("Return friction force F_ret", conveyor.return_friction_n, "N"))
     else:
-        force_rows.insert(1, ("Tensão estática de catenária", conveyor.catenary_tension_n or 0.0, "N"))
-    st.dataframe(pd.DataFrame(force_rows, columns=["Grandeza", "Valor", "Unidade"]), hide_index=True, use_container_width=True)
+        force_rows.insert(1, ("Static catenary tension", conveyor.catenary_tension_n or 0.0, "N"))
 
-with st.expander("Auxílio para calcular a massa da madeira"):
-    density = st.number_input("Densidade [kg/m³]", min_value=1.0, value=1150.0, step=10.0)
-    g1, g2 = st.columns(2)
-    with g1:
-        st.markdown("**Bloco retangular**")
+    st.dataframe(
+        pd.DataFrame(force_rows, columns=["Parameter", "Value", "Unit"]),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
+with st.expander("Wood mass helper"):
+    density = st.number_input("Material density [kg/m³]", min_value=1.0, value=1150.0, step=10.0)
+    mass_col_1, mass_col_2 = st.columns(2)
+
+    with mass_col_1:
+        st.markdown("**Rectangular block**")
         base = st.number_input("Base [m]", value=0.40, step=0.01, key="rect_base")
-        height = st.number_input("Altura [m]", value=0.20, step=0.01, key="rect_height")
-        length = st.number_input("Comprimento [m]", value=3.00, step=0.10, key="rect_length")
-        vol, mass = rectangular_mass(base, height, length, density)
-        st.write(f"Volume: **{fmt(vol,3)} m³**")
-        st.write(f"Massa: **{fmt(mass,1)} kg**")
-    with g2:
-        st.markdown("**Bloco cilíndrico**")
-        diameter = st.number_input("Diâmetro [m]", value=0.40, step=0.01, key="cyl_d")
-        cyl_length = st.number_input("Comprimento [m]", value=3.00, step=0.10, key="cyl_l")
-        vol, mass = cylindrical_mass(diameter, cyl_length, density)
-        st.write(f"Volume: **{fmt(vol,3)} m³**")
-        st.write(f"Massa: **{fmt(mass,1)} kg**")
+        height = st.number_input("Height [m]", value=0.20, step=0.01, key="rect_height")
+        length = st.number_input("Length [m]", value=3.00, step=0.10, key="rect_length")
+        volume, mass = rectangular_mass(base, height, length, density)
+        st.write(f"Volume: **{fmt(volume, 3)} m³**")
+        st.write(f"Mass: **{fmt(mass, 1)} kg**")
 
-st.caption("O fator de projeto do acionamento é aplicado ao requisito calculado de força, torque e potência. A verificação estrutural da corrente contra ruptura deve ser realizada separadamente.")
+    with mass_col_2:
+        st.markdown("**Cylindrical log**")
+        diameter = st.number_input("Diameter [m]", value=0.40, step=0.01, key="cyl_diameter")
+        cylinder_length = st.number_input("Length [m]", value=3.00, step=0.10, key="cyl_length")
+        volume, mass = cylindrical_mass(diameter, cylinder_length, density)
+        st.write(f"Volume: **{fmt(volume, 3)} m³**")
+        st.write(f"Mass: **{fmt(mass, 1)} kg**")
+
+
+# GLOSSARY --------------------------------------------------------------------
+
+st.divider()
+st.markdown(
+    '<div class="section-kicker">Reference</div>'
+    '<div class="section-title">Variable glossary</div>',
+    unsafe_allow_html=True,
+)
+
+glossary_rows = [
+    {"Variable": "C", "Name": "Center distance", "Description": "Distance between the centers of the conveyor sprockets.", "Unit": "m", "Shown in schematic": "Yes"},
+    {"Variable": "Dp", "Name": "Pitch diameter", "Description": "Pitch diameter of the conveyor sprocket.", "Unit": "mm", "Shown in schematic": "Yes"},
+    {"Variable": "F_add", "Name": "Additional force", "Description": "Additional external or process force acting against conveyor motion.", "Unit": "N", "Shown in schematic": "Yes"},
+    {"Variable": "F_top", "Name": "Top friction force", "Description": "Friction force on the loaded upper strand.", "Unit": "N", "Shown in schematic": "Yes"},
+    {"Variable": "F_ret", "Name": "Return friction force", "Description": "Friction force on the guided return strand.", "Unit": "N", "Shown in schematic": "Guided return only"},
+    {"Variable": "s", "Name": "Sag", "Description": "Vertical sag of the unsupported return strand.", "Unit": "mm", "Shown in schematic": "Sag return only"},
+    {"Variable": "μ_top", "Name": "Top friction coefficient", "Description": "Coefficient of friction used for the loaded upper sliding strand.", "Unit": "-", "Shown in schematic": "No"},
+    {"Variable": "μ_ret", "Name": "Return friction coefficient", "Description": "Coefficient of friction used for the guided return strand.", "Unit": "-", "Shown in schematic": "No"},
+    {"Variable": "ω", "Name": "Angular velocity", "Description": "Angular velocity of the drive sprocket.", "Unit": "rad/s", "Shown in schematic": "Yes"},
+    {"Variable": "α", "Name": "Conveyor inclination", "Description": "Inclination angle of the conveyor relative to horizontal.", "Unit": "°", "Shown in schematic": "No"},
+]
+
+st.dataframe(
+    pd.DataFrame(glossary_rows),
+    hide_index=True,
+    use_container_width=True,
+)
+
+st.markdown(
+    """
+    <div class="soft-note">
+        <b>Load-sharing assumption:</b> force per strand assumes reasonably uniform load distribution between parallel chains. This requires compatible chain lengths, synchronized sprockets, level guides, equivalent tensioning and similar wear between strands.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.caption(
+    "The drive design factor is applied to the calculated force, torque and power demand. "
+    "Structural verification of the chain against breaking load must be performed separately."
+)
