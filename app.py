@@ -126,8 +126,13 @@ st.markdown(
         border: 1px solid var(--border);
         border-bottom: none;
         padding: 0.34rem 0.52rem;
+<<<<<<< HEAD
         font-size: 0.94rem;
         line-height: 1.18rem;
+=======
+        font-size: 0.86rem;
+        line-height: 1.10rem;
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
         font-weight: 700;
         color: var(--text);
         border-radius: 5px 5px 0 0;
@@ -156,18 +161,30 @@ st.markdown(
         border-right: 1px solid var(--border);
         border-bottom: 1px solid var(--border);
         padding: 0.34rem 0.46rem;
+<<<<<<< HEAD
         min-height: 52px;
+=======
+        min-height: 47px;
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
         background: #fff;
     }
 
     .cell-label {
+<<<<<<< HEAD
         font-size: 0.80rem;
+=======
+        font-size: 0.72rem;
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
         color: var(--muted);
         line-height: 0.9rem;
     }
 
     .cell-value {
+<<<<<<< HEAD
         font-size: 1.00rem;
+=======
+        font-size: 0.90rem;
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
         font-weight: 700;
         color: var(--text);
         line-height: 1.05rem;
@@ -263,17 +280,28 @@ st.markdown(
 
     div[data-testid="stNumberInput"] input,
     div[data-testid="stTextInput"] input {
+<<<<<<< HEAD
         font-size: 0.86rem !important;
         min-height: 2.18rem !important;
         height: 2.18rem !important;
+=======
+        font-size: 0.78rem !important;
+        min-height: 2.00rem !important;
+        height: 2.00rem !important;
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
         padding-top: 0.16rem !important;
         padding-bottom: 0.16rem !important;
         background: var(--input) !important;
     }
 
     div[data-testid="stSelectbox"] > div > div {
+<<<<<<< HEAD
         min-height: 2.18rem !important;
         font-size: 0.86rem !important;
+=======
+        min-height: 2.00rem !important;
+        font-size: 0.78rem !important;
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
         background: var(--input) !important;
     }
 
@@ -469,7 +497,11 @@ st.markdown(
 # PAGE 1 — SYSTEM INPUTS + SCHEMATIC
 # =============================================================================
 
+<<<<<<< HEAD
 col_sys, col_scheme = st.columns([1.15, 0.85], gap="medium")
+=======
+col_sys, col_scheme = st.columns([1.05, 0.95], gap="medium")
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
 
 with col_sys:
     section_bar("1 · SYSTEM INPUTS")
@@ -626,7 +658,11 @@ cell_grid(demand_items, columns=5)
 # PAGE 1.5 — DRIVE CONNECTION
 # =============================================================================
 
+<<<<<<< HEAD
 col_conn_input, col_conn_img = st.columns([0.95, 1.05], gap="medium")
+=======
+col_conn_input, col_conn_img = st.columns([0.72, 1.28], gap="medium")
+>>>>>>> 98e8b33c0ba1aa3e1601beed7b63f4e576f380ef
 
 with col_conn_input:
     section_bar("2 · DRIVE CONNECTION")
