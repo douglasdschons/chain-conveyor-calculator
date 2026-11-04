@@ -5,7 +5,18 @@ from math import cos, pi, radians, sin, sqrt
 
 
 G = 9.81
-KW_TO_CV = 1 / 0.7355
+CV_TO_KW = 0.73549875  # metric horsepower (cv), not mechanical horsepower (hp)
+KW_TO_CV = 1.0 / CV_TO_KW
+
+
+def kw_to_cv(power_kw: float) -> float:
+    """Convert power in kilowatts to metric horsepower (cv)."""
+    return power_kw * KW_TO_CV
+
+
+def cv_to_kw(power_cv: float) -> float:
+    """Convert power in metric horsepower (cv) to kilowatts."""
+    return power_cv * CV_TO_KW
 
 
 @dataclass(frozen=True)
@@ -32,6 +43,8 @@ class ConveyorResult:
     total_chain_mass_kg: float
     top_chain_mass_kg: float
     return_chain_mass_kg: float
+    arc_chain_mass_kg: float
+    top_supported_mass_kg: float
     top_friction_n: float
     return_friction_n: float
     inclination_force_n: float
@@ -129,8 +142,8 @@ def return_length(center_distance_m: float, return_type: str, sag_mm: float) -> 
         raise ValueError("Tipo de retorno inválido.")
     sag_m = sag_mm / 1000.0
     _validate_positive(sag_m, "Flecha")
-    # Aproximação parabólica de pequeno/médio abaulamento.
-    return center_distance_m + (8.0 * sag_m**2) / (3.0 * center_distance_m)
+    # Small- to moderate-sag parabolic approximation for a horizontal span.
+    return center_distance_m + 8.0 * sag_m**2 / (3.0 * center_distance_m)
 
 
 def calculate_conveyor(data: ConveyorInput) -> ConveyorResult:
@@ -146,31 +159,21 @@ def calculate_conveyor(data: ConveyorInput) -> ConveyorResult:
     diameter_m = data.conveyor_sprocket_pitch_diameter_mm / 1000.0
     return_len = return_length(data.center_distance_m, data.return_type, data.return_sag_mm)
 
-    top_chain_mass = (
-        data.center_distance_m * data.chain_mass_per_m_kg * data.strands
-    )
+    top_chain_mass = data.center_distance_m * data.chain_mass_per_m_kg * data.strands
     return_chain_mass = return_len * data.chain_mass_per_m_kg * data.strands
     arc_length_per_strand = pi * diameter_m
     arc_chain_mass = arc_length_per_strand * data.chain_mass_per_m_kg * data.strands
     total_chain_mass = top_chain_mass + return_chain_mass + arc_chain_mass
+    top_supported_mass = data.load_mass_kg + top_chain_mass
 
-    top_friction = (
-        data.mu_top
-        * (data.load_mass_kg + top_chain_mass)
-        * G
-        * cos(alpha)
-    )
+    top_friction = data.mu_top * top_supported_mass * G * cos(alpha)
     return_friction = 0.0
     if data.return_type == "Guiado":
-        return_friction = (
-            data.mu_return * return_chain_mass * G * cos(alpha)
-        )
+        return_friction = data.mu_return * return_chain_mass * G * cos(alpha)
 
     inclination_force = data.load_mass_kg * G * sin(alpha)
     regime_force = (
-        top_friction
-        + return_friction
-        + inclination_force
+        top_friction + return_friction + inclination_force
         + data.additional_process_force_n
     )
 
@@ -183,7 +186,6 @@ def calculate_conveyor(data: ConveyorInput) -> ConveyorResult:
     force_before_df = regime_force + acceleration_force
     design_force = force_before_df * data.design_factor
     force_per_strand = design_force / data.strands
-
     axis_speed = data.linear_speed_m_min / (pi * diameter_m)
     axis_torque = design_force * diameter_m / 2.0
     axis_power = design_force * (data.linear_speed_m_min / 60.0) / 1000.0
@@ -201,6 +203,8 @@ def calculate_conveyor(data: ConveyorInput) -> ConveyorResult:
         total_chain_mass_kg=total_chain_mass,
         top_chain_mass_kg=top_chain_mass,
         return_chain_mass_kg=return_chain_mass,
+        arc_chain_mass_kg=arc_chain_mass,
+        top_supported_mass_kg=top_supported_mass,
         top_friction_n=top_friction,
         return_friction_n=return_friction,
         inclination_force_n=inclination_force,
@@ -214,7 +218,7 @@ def calculate_conveyor(data: ConveyorInput) -> ConveyorResult:
         required_axis_speed_rpm=axis_speed,
         required_axis_torque_nm=axis_torque,
         required_axis_power_kw=axis_power,
-        required_axis_power_cv=axis_power * KW_TO_CV,
+        required_axis_power_cv=kw_to_cv(axis_power),
         catenary_horizontal_n=h,
         catenary_vertical_n=v,
         catenary_tension_n=t,
@@ -234,26 +238,20 @@ def calculate_secondary_requirement(
             required_reducer_torque_nm=axis_torque_nm,
             required_reducer_power_kw=axis_power_kw,
         )
-
     if transmission.coupling_type != "Transmissão secundária":
         raise ValueError("Tipo de acoplamento inválido.")
 
-    _validate_positive(
-        transmission.reducer_sprocket_pitch_diameter_mm,
-        "Ø primitivo da roda no redutor",
-    )
-    _validate_positive(
-        transmission.shaft_sprocket_pitch_diameter_mm,
-        "Ø primitivo da roda no eixo",
-    )
+    _validate_positive(transmission.reducer_sprocket_pitch_diameter_mm, "Ø primitivo da roda no redutor")
+    _validate_positive(transmission.shaft_sprocket_pitch_diameter_mm, "Ø primitivo da roda no eixo")
     _validate_positive(transmission.efficiency_pct, "Rendimento da transmissão")
+    if transmission.efficiency_pct > 100:
+        raise ValueError("Rendimento da transmissão não pode exceder 100%.")
 
     ratio = (
         transmission.shaft_sprocket_pitch_diameter_mm
         / transmission.reducer_sprocket_pitch_diameter_mm
     )
     eta = transmission.efficiency_pct / 100.0
-
     return SecondaryTransmissionRequirement(
         ratio=ratio,
         required_reducer_speed_rpm=axis_speed_rpm * ratio,
@@ -266,12 +264,8 @@ def complete_gearmotor_output(data: CompleteGearmotorInput) -> DriveOutput:
     _validate_positive(data.output_speed_rpm, "Rotação de saída")
     _validate_positive(data.output_torque_nm, "Torque de saída")
     power_kw = (
-        data.output_torque_nm
-        * 2.0
-        * pi
-        * data.output_speed_rpm
-        / 60.0
-        / 1000.0
+        data.output_torque_nm * 2.0 * pi * data.output_speed_rpm
+        / 60.0 / 1000.0
     )
     return DriveOutput(
         reducer_output_speed_rpm=data.output_speed_rpm,
@@ -287,46 +281,32 @@ def separate_drive_output(data: SeparateDriveInput) -> DriveOutput:
     _validate_positive(data.motor_speed_rpm, "Rotação do motor")
     _validate_positive(data.nominal_frequency_hz, "Frequência nominal")
     _validate_positive(data.operating_frequency_hz, "Frequência de operação")
+    if data.reducer_efficiency_pct > 100:
+        raise ValueError("Rendimento do redutor não pode exceder 100%.")
 
     operating_speed = (
-        data.motor_speed_rpm
-        * data.operating_frequency_hz
-        / data.nominal_frequency_hz
+        data.motor_speed_rpm * data.operating_frequency_hz / data.nominal_frequency_hz
     )
-
-    # Modelo simplificado de VFD:
-    # abaixo da frequência base: torque aproximadamente constante;
-    # acima da base: potência aproximadamente constante.
+    # Simplified VFD approximation: constant torque below nominal frequency,
+    # constant power above nominal frequency. This is not a motor capability curve.
     if data.operating_frequency_hz <= data.nominal_frequency_hz:
         motor_power_kw = (
-            data.motor_power_kw
-            * data.operating_frequency_hz
-            / data.nominal_frequency_hz
+            data.motor_power_kw * data.operating_frequency_hz / data.nominal_frequency_hz
         )
     else:
         motor_power_kw = data.motor_power_kw
-
     if data.reducer_max_input_power_kw > 0:
         motor_power_kw = min(motor_power_kw, data.reducer_max_input_power_kw)
 
     motor_torque_nm = 9550.0 * motor_power_kw / operating_speed
     eta = data.reducer_efficiency_pct / 100.0
-
     reducer_speed = operating_speed / data.reducer_ratio
     theoretical_torque = motor_torque_nm * data.reducer_ratio * eta
     available_torque = theoretical_torque
     if data.reducer_max_torque_nm > 0:
         available_torque = min(theoretical_torque, data.reducer_max_torque_nm)
 
-    available_power = (
-        available_torque
-        * 2.0
-        * pi
-        * reducer_speed
-        / 60.0
-        / 1000.0
-    )
-
+    available_power = available_torque * 2.0 * pi * reducer_speed / 60.0 / 1000.0
     return DriveOutput(
         reducer_output_speed_rpm=reducer_speed,
         reducer_output_torque_nm=available_torque,
@@ -341,7 +321,6 @@ def calculate_final_output(
     conveyor_pitch_diameter_mm: float,
 ) -> FinalOutput:
     diameter_m = conveyor_pitch_diameter_mm / 1000.0
-
     if transmission.coupling_type == "Direto":
         axis_speed = drive.reducer_output_speed_rpm
         axis_torque = drive.reducer_output_torque_nm
@@ -356,24 +335,20 @@ def calculate_final_output(
         eta = transmission.efficiency_pct / 100.0
         axis_speed = drive.reducer_output_speed_rpm / ratio
         axis_torque = drive.reducer_output_torque_nm * ratio * eta
-        axis_power = (
-            axis_torque * 2.0 * pi * axis_speed / 60.0 / 1000.0
-        )
+        axis_power = axis_torque * 2.0 * pi * axis_speed / 60.0 / 1000.0
 
         dp1_m = transmission.reducer_sprocket_pitch_diameter_mm / 1000.0
+        # IMPORTANT: this is Ft=T1-T2, NOT the actual resultant reducer radial load.
         radial_force = 2.0 * drive.reducer_output_torque_nm / dp1_m
-
         critical_dp = None
         if drive.admissible_radial_force_n > 0:
+            # Theoretical Ft-only comparison; not a permissible sprocket diameter.
             critical_dp = (
-                2.0
-                * drive.reducer_output_torque_nm
-                / drive.admissible_radial_force_n
-                * 1000.0
+                2.0 * drive.reducer_output_torque_nm
+                / drive.admissible_radial_force_n * 1000.0
             )
 
     linear_speed = pi * diameter_m * axis_speed
-
     return FinalOutput(
         axis_speed_rpm=axis_speed,
         axis_torque_nm=axis_torque,
