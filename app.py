@@ -164,7 +164,7 @@ def render_schematic(path: Path | None, missing_text: str) -> None:
     if path is None:
         st.warning(missing_text)
     else:
-        st.image(str(path), use_container_width=True)
+        st.image(str(path), width="stretch")
 
 
 def power_from_kw(prefix: str) -> None:
@@ -483,7 +483,7 @@ with col_drive:
                         "FR2 [N]": round(alt_row.admissible_radial_output_n),
                         "Preliminary": alt_status,
                     })
-                st.dataframe(pd.DataFrame(alternatives), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(alternatives), hide_index=True, width="stretch")
                 st.caption("*PASS is preliminary numerical screening only; verify thermal limit, "
                            "manufacturer selection, mounting and actual service regime. "
                            "Motor power is limited to the smaller of the currently entered motor "
@@ -663,7 +663,7 @@ with st.expander("Auxiliary carried-mass calculator"):
     with c1:
         section_bar("RECTANGULAR PRISM")
         if IMG_PRISM:
-            st.image(str(IMG_PRISM), use_container_width=True)
+            st.image(str(IMG_PRISM), width="stretch")
         rr = st.columns(3)
         with rr[0]:
             l1 = st.number_input("ℓ1 [m]", value=3., step=.1, key="p_l1")
@@ -677,7 +677,7 @@ with st.expander("Auxiliary carried-mass calculator"):
     with c2:
         section_bar("CYLINDER / LOG")
         if IMG_CYLINDER:
-            st.image(str(IMG_CYLINDER), use_container_width=True)
+            st.image(str(IMG_CYLINDER), width="stretch")
         rr = st.columns(2)
         with rr[0]:
             d = st.number_input("Ø [m]", value=.4, step=.01, key="c_d")
@@ -711,7 +711,7 @@ with st.expander("Engineering notes / variable glossary"):
         ["T1, T2", "Tight- and slack-side transmission chain tension", "N"],
         ["F_R", "Resultant radial force at reducer sprocket", "N"],
     ], columns=["Variable", "Description", "Unit"])
-    st.dataframe(glossary, hide_index=True, use_container_width=True)
+    st.dataframe(glossary, hide_index=True, width="stretch")
     st.markdown("""<div class="panel-note">
       <b>Parallel chains:</b> force per strand assumes reasonably equal load sharing;
       chain lengths, sprockets, guiding and tensioning must be compatible.<br>
