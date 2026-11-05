@@ -50,6 +50,21 @@ class StreamlitRuntimeTests(unittest.TestCase):
                         app.run(timeout=40)
                         self.assertFalse(app.exception)
 
+    def test_project_factor_and_report(self):
+        app = self.create_app().run(timeout=40)
+        label = "Fator de projeto do acionamento [-]"
+        def get_report():
+            return app.get("download_button")[0].proto
+        self.assertFalse(app.exception)
+        before = app.markdown
+        demand_before = next(x.value for x in before if "Força de projeto" in x.value)
+        next(x for x in app.text_input if x.label == label).set_value("3,0").run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state["project_factor"], 3.)
+        demand_after = next(x.value for x in app.markdown if "Força de projeto" in x.value)
+        self.assertNotEqual(demand_before, demand_after)
+        self.assertEqual(get_report().label, "Gerar relatório para impressão")
+
 
 if __name__ == "__main__":
     unittest.main()

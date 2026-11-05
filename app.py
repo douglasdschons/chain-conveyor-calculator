@@ -6,6 +6,8 @@ centralizado em src/calculations.py. Imagens originais não são modificadas.
 from __future__ import annotations
 
 from html import escape
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import streamlit as st
@@ -16,6 +18,7 @@ from src.calculations import (
     SecondaryTransmissionInput,
     SeparateDriveInput,
     calculate_conveyor,
+    calculate_final_output,
     calculate_secondary_requirement,
     complete_gearmotor_output,
     cv_to_kw,
@@ -95,6 +98,20 @@ st.markdown(
     div[data-testid="stSelectbox"]>div>div{min-height:2.18rem!important;font-size:.86rem!important;background:var(--input)!important}
     div[data-testid="stExpander"] summary{font-size:.85rem!important;font-weight:600!important}
     .power-label{font-size:.77rem;color:#344054;margin-bottom:.12rem}
+
+    /* Entradas e resultados têm a mesma família e tamanho de fonte. */
+    .cell-label,.cell-value,.result-label,.result-value{
+      font-family:inherit!important;font-size:.84rem!important;
+      font-weight:400!important;color:#000!important}
+    div[data-testid="stTextInput"] label p,
+    div[data-testid="stSelectbox"] label p,
+    div[data-testid="stRadio"] label p,
+    div[data-testid="stToggle"] label p,
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stSelectbox"] [data-baseweb="select"],
+    div[data-testid="stSelectbox"] [data-baseweb="select"] *,
+    .power-label{font-family:inherit!important;font-size:.84rem!important;
+      color:#163b67!important;font-weight:700!important}
     @media(max-width:900px){.block-container{padding:.5rem .55rem 1rem}
       .cell-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
     </style>""",
@@ -315,12 +332,9 @@ with col_sys:
         acceleration_time = (number_input_pt("Tempo de aceleração [s]",
                                               min_value=.01, value=3., step=.5)
                              if consider_acceleration else 0.)
-    with dynamics[2]:
-        design_factor = number_input_pt(
-            "Fator de projeto do acionamento [-]", min_value=1.,
-            value=1.5, step=.05,
-            help="Margem aplicada uma única vez à força, torque e potência necessários."
-        )
+
+# O callback do campo da seção 4 confirma o valor antes de cada reexecução.
+design_factor = st.session_state.get("project_factor", 1.5)
 
 conveyor = calculate_conveyor(ConveyorInput(
     center_distance_m=center_distance_m,
@@ -541,7 +555,96 @@ else:
         operating_frequency_hz=operating_freq,
     ))
 
-# Não exibe o bloco "Necessário × disponível" nesta versão.
+section_bar("4 · NECESSÁRIO × DISPONÍVEL")
+number_input_pt(
+    "Fator de projeto do acionamento [-]", min_value=1., value=1.5,
+    step=.05, key="project_factor",
+    help="Margem aplicada uma única vez à força, torque e potência necessários."
+)
+final = calculate_final_output(drive, transmission, conveyor_dp)
+comparison = [
+    ("Velocidade linear [m/min]", linear_speed, final.linear_speed_m_min),
+    ("Rotação do eixo [rpm]", conveyor.required_axis_speed_rpm, final.axis_speed_rpm),
+    ("Torque no eixo [N·m]", conveyor.required_axis_torque_nm, final.axis_torque_nm),
+    ("Potência no eixo [kW]", conveyor.required_axis_power_kw, final.axis_power_kw),
+]
+rows = []
+for label, needed, available in comparison:
+    status = "Atende" if available + 1e-9 >= needed else "Não atende"
+    rows.append(f"<tr><td>{escape(label)}</td><td>{fmt(needed,2)}</td>"
+                f"<td>{fmt(available,2)}</td><td>{status}</td></tr>")
+comparison_html = (
+    '<table style="width:100%;border-collapse:collapse" border="1" cellpadding="6">'
+    '<thead><tr><th>Grandeza</th><th>Necessário</th><th>Disponível</th>'
+    '<th>Verificação de capacidade</th></tr></thead><tbody>' + "".join(rows) + '</tbody></table>'
+)
+st.markdown(comparison_html, unsafe_allow_html=True)
+radial_note = "Carga radial: verificação pendente com o fabricante."
+if final.radial_tangential_force_n is not None:
+    radial_note += (f" Força tangencial Ft = {fmt(final.radial_tangential_force_n,1)} N; "
+                    f"limite radial informado = {fmt(drive.admissible_radial_force_n,1)} N. "
+                    "Ft não representa a carga radial resultante das duas ramas.")
+st.caption(radial_note)
+st.caption("Velocidade e rotação: a comparação indica capacidade mínima; "
+           "valores superiores exigem ajuste para a velocidade desejada.")
+
+
+def build_report() -> str:
+    def table(items):
+        return '<table>' + ''.join(
+            '<tr><th>' + escape(str(label)) + '</th><td>' + escape(str(value)) + '</td></tr>'
+            for label, value in items) + '</table>'
+
+    # Todos os campos confirmados do formulário, inclusive especificações do motor.
+    inputs = []
+    for key, value in st.session_state.items():
+        if key.startswith("entrada:"):
+            label = key.removeprefix("entrada:").removeprefix("numero:")
+            inputs.append((label, value))
+    inputs += [("Tipo de retorno", return_mode), ("Conexão", coupling_mode),
+               ("Tipo de acionamento", supply_mode), ("Inclinação [°]", fmt(inclination_deg,2)),
+               ("Aceleração considerada", "Sim" if consider_acceleration else "Não"),
+               ("Fator de projeto aplicado", fmt(design_factor,2))]
+    if supply_mode == "Motoredutor completo":
+        inputs += [("Fabricante", gm_manufacturer), ("Modelo", gm_model)]
+    else:
+        inputs += [("Fabricante do redutor", reducer_manufacturer), ("Modelo do redutor", reducer_model),
+                   ("Fabricante do motor", motor_manufacturer), ("Modelo do motor", motor_model)]
+    masses = [("Correntes superiores [kg]", fmt(conveyor.top_chain_mass_kg,2)),
+              ("Massa apoiada [kg]", fmt(conveyor.top_supported_mass_kg,2)),
+              ("Correntes do retorno [kg]", fmt(conveyor.return_chain_mass_kg,2)),
+              ("Correntes nos arcos [kg]", fmt(conveyor.arc_chain_mass_kg,2)),
+              ("Total das correntes [kg]", fmt(conveyor.total_chain_mass_kg,2)),
+              ("Atrito superior [N]", fmt(conveyor.top_friction_n,2)),
+              ("Atrito do retorno [N]", fmt(conveyor.return_friction_n,2)),
+              ("Força de inclinação [N]", fmt(conveyor.inclination_force_n,2)),
+              ("Força de aceleração [N]", fmt(conveyor.acceleration_force_n,2))]
+    reducer = [("Rotação necessária no redutor [rpm]", fmt(requirement.required_reducer_speed_rpm,2)),
+               ("Torque necessário no redutor [N·m]", fmt(requirement.required_reducer_torque_nm,2)),
+               ("Potência necessária no redutor [kW]", fmt(requirement.required_reducer_power_kw,3))]
+    stamp = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y %H:%M")
+    return ('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">'
+            '<title>Relatório do transportador</title><style>'
+            'body{font:14px Arial,sans-serif;color:#111;max-width:1000px;margin:24px auto}'
+            'table{border-collapse:collapse;width:100%;margin:12px 0}'
+            'th,td{border:1px solid #ccc;padding:6px;text-align:left}'
+            'tr{break-inside:avoid}h2{break-after:avoid}button{padding:12px}'
+            '@page{size:A4;margin:15mm}@media print{button{display:none}body{margin:0}}'
+            '</style></head><body><button onclick="window.print()">Imprimir / Salvar como PDF</button>'
+            '<h1>Calculadora de transportadores de correntes</h1><p>Versão 4 · ' + stamp +
+            ' · America/Sao_Paulo</p><h2>Dados e especificações</h2>' + table(inputs) +
+            '<h2>Massas e forças</h2>' + table(masses) + '<h2>Demanda do sistema</h2>' +
+            table(demand_items) + '<h2>Demanda no redutor</h2>' + table(reducer) +
+            '<h2>Necessário × disponível</h2>' + comparison_html + '<p>' + escape(radial_note) +
+            '</p><p>Velocidades superiores exigem ajuste. O fator de projeto foi aplicado uma única vez. '
+            'A verificação radial permanece pendente com o fabricante.</p></body></html>')
+
+
+report_html = build_report()
+st.download_button("Gerar relatório para impressão", data=report_html,
+                   file_name="relatorio_transportador.html", mime="text/html")
+st.caption("Abra o relatório no navegador e use Imprimir / Salvar como PDF.")
+
 
 # -----------------------------------------------------------------------------
 # CALCULADORA AUXILIAR: imagens a 50%, funcionalidade preservada

@@ -32,6 +32,10 @@ class FakeStreamlit(types.ModuleType):
         self.html = []
         self.radio_options = {}
         self.text_labels = []
+        self.downloads = []
+
+    def download_button(self, label, **kwargs):
+        self.downloads.append((label, kwargs))
 
     def columns(self, spec, **_):
         n = spec if isinstance(spec, int) else len(spec)
@@ -102,7 +106,10 @@ class AppSmokeTests(unittest.TestCase):
                                       else "separate_motor_kw", fake.session_state)
                         self.assertEqual(fake.radio_options["Tipo de acionamento"],
                                          ["Motoredutor completo", "Redutor e motor separados"])
-                        self.assertNotIn("4 · NECESSÁRIO × DISPONÍVEL", "".join(fake.html))
+                        self.assertIn("4 · NECESSÁRIO × DISPONÍVEL", "".join(fake.html))
+                        self.assertIn("Necessário × disponível", env["report_html"])
+                        self.assertIn("window.print()", env["report_html"])
+                        self.assertEqual(len(fake.downloads), 1)
                         self.assertNotIn("Metodologia de cálculo", "".join(fake.html))
                         self.assertNotIn("Notas de engenharia e glossário", "".join(fake.html))
 
