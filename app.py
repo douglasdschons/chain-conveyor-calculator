@@ -1,7 +1,6 @@
-"""Chain Conveyor Calculator — one-page engineering application.
+"""Calculadora de transportadores de correntes com interface em português brasileiro.
 
-Version based on public main branch inspected on 2026-11-04.
-Static images are reused from the existing repository's assets/ directory.
+As imagens estáticas originais são reutilizadas do diretório assets/.
 """
 from __future__ import annotations
 
@@ -11,6 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+from src.localization import format_number, parse_number
 
 from src.calculations import (
     CompleteGearmotorInput,
@@ -38,7 +39,7 @@ from src.ibr_catalog import (
 )
 
 st.set_page_config(
-    page_title="Chain Conveyor Calculator",
+    page_title="Calculadora de transportadores de correntes",
     page_icon="⚙️",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -123,7 +124,51 @@ st.markdown(
 
 
 def fmt(value: float, decimals: int = 1) -> str:
-    return f"{value:,.{decimals}f}"
+    return format_number(value, decimals)
+
+
+def _commit_number(key, integer, minimum, maximum, callback, args):
+    try:
+        value = parse_number(st.session_state[f"entrada:{key}"], integer)
+        if minimum is not None and value < minimum:
+            raise ValueError(f"O valor mínimo é {fmt(minimum, 5).rstrip('0').rstrip(',')}.")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"O valor máximo é {fmt(maximum, 5).rstrip('0').rstrip(',')}.")
+    except ValueError as error:
+        st.session_state[f"erro:{key}"] = str(error)
+        return
+    st.session_state.pop(f"erro:{key}", None)
+    st.session_state[key] = value
+    if callback:
+        callback(*args)
+
+
+def number_input_pt(label, min_value=None, max_value=None, value=None, step=None,
+                    format=None, key=None, on_change=None, args=(), help=None):
+    """Campo decimal independente do idioma do navegador, com limites validados."""
+    key = key or f"numero:{label}"
+    if value is None:
+        value = min_value if min_value is not None else 0.0
+    integer = isinstance(value, int) and (step is None or isinstance(step, int))
+    decimals = (int(format.split('.')[1][:-1]) if format else
+                max(2, len(str(value).partition('.')[2]), len(str(step or 1).partition('.')[2])))
+    if integer:
+        decimals = 0
+    st.session_state.setdefault(key, value)
+    if format is None and not integer:
+        decimals = max(decimals, len(str(st.session_state[key]).partition('.')[2]))
+    text_key = f"entrada:{key}"
+    shown_key = f"exibido:{key}"
+    if text_key not in st.session_state or st.session_state.get(shown_key) != st.session_state[key]:
+        st.session_state[text_key] = format_number(st.session_state[key], decimals, grouping=False)
+        st.session_state[shown_key] = st.session_state[key]
+    st.text_input(label, key=text_key, help=help,
+                  on_change=_commit_number,
+                  args=(key, integer, min_value, max_value, on_change, args))
+    if st.session_state.get(f"erro:{key}"):
+        st.error(f"{label}: {st.session_state[f'erro:{key}']}")
+        st.stop()
+    return st.session_state[key]
 
 
 def section_bar(title: str) -> None:
@@ -141,23 +186,23 @@ def cell_grid(items: list[tuple[str, str]], columns: int = 2) -> None:
 
 
 def status_badge(status: str) -> str:
-    cls = {"OK": "status-ok", "WARNING": "status-warn",
-           "REVIEW": "status-warn", "FAIL": "status-bad"}.get(status, "status-warn")
+    cls = {"OK": "status-ok", "ATENÇÃO": "status-warn",
+           "EM REVISÃO": "status-warn", "NÃO ATENDE": "status-bad"}.get(status, "status-warn")
     return f'<span class="{cls}">{escape(status)}</span>'
 
 
 def capacity_status(available: float, required: float) -> tuple[float, str]:
     if required <= 0:
-        return 0.0, "REVIEW"
+        return 0.0, "EM REVISÃO"
     ratio = available / required
-    return ratio, "OK" if ratio >= 1.2 else "WARNING" if ratio >= 1 else "FAIL"
+    return ratio, "OK" if ratio >= 1.2 else "ATENÇÃO" if ratio >= 1 else "NÃO ATENDE"
 
 
 def speed_status(available: float, required: float) -> tuple[float, str]:
     if required <= 0:
-        return 0.0, "REVIEW"
+        return 0.0, "EM REVISÃO"
     error = (available - required) / required
-    return error, "OK" if abs(error) <= 0.05 else "REVIEW"
+    return error, "OK" if abs(error) <= 0.05 else "EM REVISÃO"
 
 
 def render_schematic(path: Path | None, missing_text: str) -> None:
@@ -183,13 +228,13 @@ def motor_power_pair(prefix: str, default_kw: float) -> float:
         st.session_state[key_kw] = default_kw
     if key_cv not in st.session_state:
         st.session_state[key_cv] = kw_to_cv(st.session_state[key_kw])
-    st.markdown('<div class="power-label">Motor rated power</div>', unsafe_allow_html=True)
+    st.markdown('<div class="power-label">Potência nominal do motor</div>', unsafe_allow_html=True)
     a, b = st.columns(2, gap="small")
     with a:
-        st.number_input("kW", key=key_kw, min_value=0.0,
+        number_input_pt("kW", key=key_kw, min_value=0.001 if prefix == "ibr_motor" else 0.0,
                         step=0.1, format="%.3f", on_change=power_from_kw, args=(prefix,))
     with b:
-        st.number_input("cv", key=key_cv, min_value=0.0,
+        number_input_pt("cv", key=key_cv, min_value=0.001 if prefix == "ibr_motor" else 0.0,
                         step=0.1, format="%.3f", on_change=power_from_cv, args=(prefix,))
     return float(st.session_state[key_kw])
 
@@ -202,73 +247,74 @@ def _reset_ibr_catalog_motor() -> None:
         st.session_state["ibr_motor_kw"] = cv_to_kw(cv)
 
 
-st.title("Chain Conveyor Calculator")
-st.markdown('<div class="app-note">System demand · drive selection · required vs available</div>',
+st.title("Calculadora de transportadores de correntes")
+st.markdown('<div class="app-note">Demanda do sistema · seleção do acionamento · necessário × disponível</div>',
             unsafe_allow_html=True)
+st.caption('Use vírgula nos decimais. Exemplo: 1" = 25,4 mm. O ponto separa milhares: 1.000,50.')
 
 # -----------------------------------------------------------------------------
 # 1 — SYSTEM INPUTS
 # -----------------------------------------------------------------------------
 col_sys, col_scheme = st.columns([1.15, .85], gap="medium")
 with col_sys:
-    section_bar("1 · SYSTEM INPUTS")
+    section_bar("1 · DADOS DO SISTEMA")
     r = st.columns(3)
     with r[0]:
-        center_distance_m = st.number_input("Center distance C [m]", min_value=.01,
+        center_distance_m = number_input_pt("Distância entre centros C [m]", min_value=.01,
                                             value=4.15554, step=.1)
     with r[1]:
-        conveyor_dp = st.number_input("Pitch diameter Dp [mm]", min_value=1.,
+        conveyor_dp = number_input_pt("Diâmetro primitivo Dp [mm]", min_value=1.,
                                       value=260., step=1.)
     with r[2]:
-        use_inclination = st.toggle("Inclination", value=False)
-        inclination_deg = st.number_input("α [°]", value=0., step=1.) if use_inclination else 0.
+        use_inclination = st.toggle("Inclinação", value=False)
+        inclination_deg = number_input_pt("α [°]", value=0., step=1.) if use_inclination else 0.
 
     r = st.columns(2)
     with r[0]:
-        return_mode = st.selectbox("Return type", ["Guided return", "Sag return"])
+        return_mode = st.selectbox("Tipo de retorno", ["Retorno guiado", "Retorno livre com flecha"])
     with r[1]:
-        if return_mode == "Guided return":
-            mu_return = st.number_input("Return friction μ_ret [-]", min_value=0.,
+        if return_mode == "Retorno guiado":
+            mu_return = number_input_pt("Atrito no retorno μ_ret [-]", min_value=0.,
                                         value=.25, step=.01)
             sag_mm, internal_return_type = 80., "Guiado"
         else:
-            sag_mm = st.number_input("Return sag s [mm]", min_value=1.,
+            sag_mm = number_input_pt("Flecha do retorno s [mm]", min_value=1.,
                                      value=80., step=5.)
             mu_return, internal_return_type = 0., "Livre"
 
     r = st.columns(3)
     with r[0]:
-        strands = st.number_input("Chain strands [-]", min_value=1, value=4, step=1)
+        strands = number_input_pt("Vias de corrente [-]", min_value=1, value=4, step=1)
     with r[1]:
-        chain_mass_per_m = st.number_input("Chain mass [kg/m]", min_value=.01,
+        chain_mass_per_m = number_input_pt("Massa linear da corrente [kg/m]", min_value=.01,
                                             value=7.30, step=.10,
-                                            help="Mass per metre for ONE complete chain strand, including its width/configuration.")
+                                            help="Massa por metro de UMA via completa de corrente, incluindo sua largura e configuração.")
     with r[2]:
-        mu_top = st.number_input("Top friction μ_top [-]", min_value=0.,
+        mu_top = number_input_pt("Atrito superior μ_top [-]", min_value=0.,
                                  value=.35, step=.01)
     mass_breakdown_slot = st.empty()
 
     r = st.columns(3)
     with r[0]:
-        load_mass = st.number_input("Carried load [kg]", min_value=.01, value=276., step=10.)
+        load_mass = number_input_pt("Carga transportada [kg]", min_value=.01, value=276., step=10.)
     with r[1]:
-        additional_force = st.number_input("Additional F_add [N]", min_value=0.,
+        additional_force = number_input_pt("Força adicional F_add [N]", min_value=0.,
                                            value=0., step=10.)
     with r[2]:
-        linear_speed = st.number_input("Desired speed [m/min]", min_value=.01,
+        linear_speed = number_input_pt("Velocidade desejada [m/min]", min_value=.01,
                                        value=35., step=1.)
 
     r = st.columns(3)
     with r[0]:
-        consider_acceleration = st.toggle("Acceleration", value=True)
+        consider_acceleration = st.toggle("Aceleração", value=True)
     with r[1]:
-        acceleration_time = (st.number_input("Acceleration time [s]", min_value=.01,
+        acceleration_time = (number_input_pt("Tempo de aceleração [s]", min_value=.01,
                                              value=3., step=.5)
                              if consider_acceleration else 0.)
     with r[2]:
-        design_factor = st.number_input("Drive design factor [-]", min_value=1.,
+        design_factor = number_input_pt("Fator de projeto do acionamento [-]", min_value=1.,
                                         value=1.5, step=.05,
-                                        help="Applied ONCE to force, torque and power demand; not the chain breaking-load factor or a catalog gearmotor service factor.")
+                                        help="Aplicado UMA VEZ à demanda de força, torque e potência. Não equivale ao fator de segurança contra ruptura da corrente nem ao fator de serviço do catálogo.")
 
 conveyor = calculate_conveyor(ConveyorInput(
     center_distance_m=center_distance_m,
@@ -289,37 +335,37 @@ conveyor = calculate_conveyor(ConveyorInput(
 
 with mass_breakdown_slot.container():
     cell_grid([
-        ("Top chains", f"{fmt(conveyor.top_chain_mass_kg,1)} kg"),
-        ("Return chains", f"{fmt(conveyor.return_chain_mass_kg,1)} kg"),
-        ("Sprocket wraps", f"{fmt(conveyor.arc_chain_mass_kg,1)} kg"),
-        ("Total chain mass", f"{fmt(conveyor.total_chain_mass_kg,1)} kg"),
+        ("Correntes superiores", f"{fmt(conveyor.top_chain_mass_kg,1)} kg"),
+        ("Correntes do retorno", f"{fmt(conveyor.return_chain_mass_kg,1)} kg"),
+        ("Correntes nos arcos", f"{fmt(conveyor.arc_chain_mass_kg,1)} kg"),
+        ("Massa total das correntes", f"{fmt(conveyor.total_chain_mass_kg,1)} kg"),
     ], columns=4)
 
 with col_scheme:
-    section_bar("SYSTEM SCHEMATIC")
-    render_schematic(IMG_RETURN if return_mode == "Guided return" else IMG_SAG,
-                     "Return schematic image not found in assets/.")
-    st.markdown('<div class="tiny-caption">Static illustrative schematic · calculated values below</div>',
+    section_bar("ESQUEMA DO SISTEMA")
+    render_schematic(IMG_RETURN if return_mode == "Retorno guiado" else IMG_SAG,
+                     "Imagem do esquema de retorno não encontrada.")
+    st.markdown('<div class="tiny-caption">Esquema ilustrativo estático · valores calculados abaixo</div>',
                 unsafe_allow_html=True)
 
-section_bar("SYSTEM DEMAND")
+section_bar("DEMANDA DO SISTEMA")
 demand_items = [
-    ("Design force", f"{fmt(conveyor.design_force_n,0)} N"),
-    ("Force / strand", f"{fmt(conveyor.force_per_strand_n,0)} N"),
-    ("Shaft torque", f"{fmt(conveyor.required_axis_torque_nm,1)} N·m"),
-    ("Power", f"{fmt(conveyor.required_axis_power_kw,2)} kW"),
-    ("Power", f"{fmt(conveyor.required_axis_power_cv,2)} cv"),
-    ("Shaft speed", f"{fmt(conveyor.required_axis_speed_rpm,1)} rpm"),
-    ("Top supported mass", f"{fmt(conveyor.top_supported_mass_kg,1)} kg"),
-    ("Total chain mass", f"{fmt(conveyor.total_chain_mass_kg,1)} kg"),
-    ("Top friction F_top", f"{fmt(conveyor.top_friction_n,0)} N"),
-    ("Return friction F_ret", f"{fmt(conveyor.return_friction_n,0)} N"),
-    ("Steady resistance", f"{fmt(conveyor.regime_force_n,0)} N"),
+    ("Força de projeto", f"{fmt(conveyor.design_force_n,0)} N"),
+    ("Força por via", f"{fmt(conveyor.force_per_strand_n,0)} N"),
+    ("Torque no eixo", f"{fmt(conveyor.required_axis_torque_nm,1)} N·m"),
+    ("Potência", f"{fmt(conveyor.required_axis_power_kw,2)} kW"),
+    ("Potência", f"{fmt(conveyor.required_axis_power_cv,2)} cv"),
+    ("Rotação do eixo", f"{fmt(conveyor.required_axis_speed_rpm,1)} rpm"),
+    ("Massa apoiada no trecho superior", f"{fmt(conveyor.top_supported_mass_kg,1)} kg"),
+    ("Massa total das correntes", f"{fmt(conveyor.total_chain_mass_kg,1)} kg"),
+    ("Atrito superior F_top", f"{fmt(conveyor.top_friction_n,0)} N"),
+    ("Atrito no retorno F_ret", f"{fmt(conveyor.return_friction_n,0)} N"),
+    ("Resistência em regime", f"{fmt(conveyor.regime_force_n,0)} N"),
 ]
 if consider_acceleration:
     demand_items.extend([
-        ("Acceleration", f"{fmt(conveyor.acceleration_m_s2,3)} m/s²"),
-        ("Acceleration force", f"{fmt(conveyor.acceleration_force_n,0)} N"),
+        ("Aceleração", f"{fmt(conveyor.acceleration_m_s2,3)} m/s²"),
+        ("Força de aceleração", f"{fmt(conveyor.acceleration_force_n,0)} N"),
     ])
 cell_grid(demand_items, columns=5)
 
@@ -328,18 +374,18 @@ cell_grid(demand_items, columns=5)
 # -----------------------------------------------------------------------------
 col_conn_input, col_conn_img = st.columns([.95, 1.05], gap="medium")
 with col_conn_input:
-    section_bar("2 · DRIVE CONNECTION")
-    coupling_mode = st.radio("Connection", ["Direct", "Secondary chain transmission"],
+    section_bar("2 · CONEXÃO DO ACIONAMENTO")
+    coupling_mode = st.radio("Conexão", ["Direto", "Transmissão secundária por corrente"],
                              horizontal=True)
-    if coupling_mode == "Secondary chain transmission":
+    if coupling_mode == "Transmissão secundária por corrente":
         internal_coupling = "Transmissão secundária"
         r = st.columns(3)
         with r[0]:
-            secondary_dp1 = st.number_input("Dp1 [mm]", min_value=1., value=170., step=1.)
+            secondary_dp1 = number_input_pt("Dp1 [mm]", min_value=1., value=170., step=1.)
         with r[1]:
-            secondary_dp2 = st.number_input("Dp2 [mm]", min_value=1., value=202.66, step=1.)
+            secondary_dp2 = number_input_pt("Dp2 [mm]", min_value=1., value=202.66, step=1.)
         with r[2]:
-            secondary_eff = st.number_input("η_sec [%]", min_value=1., max_value=100.,
+            secondary_eff = number_input_pt("η_sec [%]", min_value=1., max_value=100.,
                                             value=98., step=.5)
     else:
         internal_coupling = "Direto"
@@ -359,15 +405,15 @@ requirement = calculate_secondary_requirement(
 )
 with col_conn_input:
     cell_grid([
-        ("Req. reducer speed", f"{fmt(requirement.required_reducer_speed_rpm,1)} rpm"),
-        ("Req. reducer torque", f"{fmt(requirement.required_reducer_torque_nm,1)} N·m"),
-        ("Req. reducer power", f"{fmt(requirement.required_reducer_power_kw,2)} kW"),
+        ("Rotação necessária no redutor", f"{fmt(requirement.required_reducer_speed_rpm,1)} rpm"),
+        ("Torque necessário no redutor", f"{fmt(requirement.required_reducer_torque_nm,1)} N·m"),
+        ("Potência necessária no redutor", f"{fmt(requirement.required_reducer_power_kw,2)} kW"),
     ], columns=1)
 with col_conn_img:
-    section_bar("DRIVE SCHEMATIC")
-    render_schematic(IMG_DIRECT if coupling_mode == "Direct" else IMG_REDUCTION,
-                     "Drive schematic image not found in assets/.")
-    st.markdown('<div class="tiny-caption">Static illustrative schematic</div>',
+    section_bar("ESQUEMA DO ACIONAMENTO")
+    render_schematic(IMG_DIRECT if coupling_mode == "Direto" else IMG_REDUCTION,
+                     "Imagem do esquema de acionamento não encontrada.")
+    st.markdown('<div class="tiny-caption">Esquema ilustrativo estático</div>',
                 unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
@@ -375,10 +421,10 @@ with col_conn_img:
 # -----------------------------------------------------------------------------
 col_drive, col_compare = st.columns([1.25, .75], gap="medium")
 with col_drive:
-    section_bar("3 · PROVIDED DRIVE")
+    section_bar("3 · ACIONAMENTO DISPONÍVEL")
     supply_mode = st.radio(
-        "Supply mode",
-        ["IBR Q catalogue", "Complete gearmotor", "Separate gearbox + motor"],
+        "Tipo de acionamento",
+        ["Catálogo IBR Q", "Motoredutor completo", "Redutor e motor separados"],
         horizontal=True,
         index=0,
     )
@@ -386,33 +432,33 @@ with col_drive:
     ibr_perf = None
     ibr_required_fs = None
     ibr_radial_catalogue = None
-    if supply_mode == "IBR Q catalogue":
-        st.caption("IBR Q worm gearbox · transcribed selection table, printed catalogue p.13–14 · "
-                   "frame sizes 075–150; ratios 30, 40 and 50 only. Not the full product range.")
+    if supply_mode == "Catálogo IBR Q":
+        st.caption("Redutor de rosca sem-fim IBR Q · tabela transcrita das páginas 13 e 14 do catálogo · "
+                   "tamanhos 075 a 150 e reduções 30, 40 e 50. O trecho não cobre toda a linha.")
         r1 = st.columns([1, 1, 2, 1])
         with r1[0]:
-            ibr_size = st.selectbox("IBR Q frame", SIZES, index=1,
+            ibr_size = st.selectbox("Tamanho IBR Q", SIZES, index=1,
                                     key="ibr_size", on_change=_reset_ibr_catalog_motor)
         with r1[1]:
-            ibr_ratio = st.selectbox("Ratio i [-]", RATIOS, index=1,
+            ibr_ratio = st.selectbox("Redução i [-]", RATIOS, index=1, format_func=lambda value: fmt(value, 0),
                                      key="ibr_ratio", on_change=_reset_ibr_catalog_motor)
         ibr_row = get_ibr_q(ibr_size, ibr_ratio)
         with r1[2]:
             ibr_motor_kw = motor_power_pair("ibr_motor", cv_to_kw(ibr_row.catalogue_motor_cv))
         with r1[3]:
-            ibr_motor_rpm = st.number_input("Motor rpm", min_value=1.0,
+            ibr_motor_rpm = number_input_pt("Rotação do motor [rpm]", min_value=1.0,
                                            value=1700.0, step=10.0, key="ibr_motor_rpm")
         ibr_perf = evaluate_ibr_q(ibr_row, kw_to_cv(ibr_motor_kw), ibr_motor_rpm)
         r2 = st.columns(3)
         with r2[0]:
-            ibr_starts = st.selectbox("Starts / hour", ["<10", ">10"], index=0)
+            ibr_starts = st.selectbox("Partidas por hora", ["<10", ">10"], index=0)
         with r2[1]:
-            ibr_duty = st.selectbox("Load classification", ["Uniform load", "Moderate shocks", "Severe shocks"], index=1)
+            ibr_duty = st.selectbox("Classificação da carga", ["Carga uniforme", "Choques moderados", "Choques intensos"], index=1)
         with r2[2]:
-            ibr_hours = st.selectbox("Operation [hours/day]", ["<2", "2–10", ">10"], index=1)
-        ibr_required_fs = required_service_factor(ibr_starts, ibr_duty, ibr_hours)
+            ibr_hours = st.selectbox("Operação [horas/dia]", ["<2", "2–10", ">10"], index=1)
+        ibr_required_fs = required_service_factor(ibr_starts, {"Carga uniforme": "Uniform load", "Choques moderados": "Moderate shocks", "Choques intensos": "Severe shocks"}[ibr_duty], ibr_hours)
         ibr_service_status = ("OK" if ibr_perf.service_factor_motor >= ibr_required_fs - 1e-6
-                              else "REVIEW")
+                              else "EM REVISÃO")
         # Actual-demand diagnostic: base includes acceleration, excludes the explicit design factor.
         ibr_base_torque = requirement.required_reducer_torque_nm / design_factor
         ibr_effective_fs_base = (ibr_row.nominal_torque_nm / ibr_base_torque
@@ -420,47 +466,47 @@ with col_drive:
         ibr_effective_fs_design = (ibr_row.nominal_torque_nm / requirement.required_reducer_torque_nm
                                    if requirement.required_reducer_torque_nm > 0 else float('inf'))
         cell_grid([
-            ("Catalog PMot limit", f"{fmt(ibr_row.catalogue_motor_cv,2)} cv"),
-            ("M2M with entered motor", f"{fmt(ibr_perf.output_torque_nm,1)} N·m"),
-            ("M2Nom (catalog)", f"{fmt(ibr_row.nominal_torque_nm,0)} N·m"),
-            ("η gearbox", f"{fmt(ibr_row.efficiency_pct,0)} %"),
-            ("Catalog fs at motor rating", f"{fmt(ibr_perf.service_factor_motor,2)} ({ibr_service_status})"),
-            ("Required fs by duty", f"{fmt(ibr_required_fs,2)}"),
-            ("fs / calculated base load", f"{fmt(ibr_effective_fs_base,2)}"),
-            ("M2Nom / design torque", f"{fmt(ibr_effective_fs_design,2)}"),
-            ("Admissible output FR2", f"{fmt(ibr_row.admissible_radial_output_n,0)} N"),
-            ("Catalog PNom", f"{fmt(ibr_row.nominal_input_cv,2)} cv"),
+            ("Limite PMot do catálogo", f"{fmt(ibr_row.catalogue_motor_cv,2)} cv"),
+            ("M2M com o motor informado", f"{fmt(ibr_perf.output_torque_nm,1)} N·m"),
+            ("M2Nom do catálogo", f"{fmt(ibr_row.nominal_torque_nm,0)} N·m"),
+            ("Rendimento do redutor η", f"{fmt(ibr_row.efficiency_pct,0)} %"),
+            ("fs com potência nominal do motor", f"{fmt(ibr_perf.service_factor_motor,2)} ({ibr_service_status})"),
+            ("fs necessário para o regime", f"{fmt(ibr_required_fs,2)}"),
+            ("fs em relação à carga base calculada", f"{fmt(ibr_effective_fs_base,2)}"),
+            ("M2Nom / torque de projeto", f"{fmt(ibr_effective_fs_design,2)}"),
+            ("FR2 admissível na saída", f"{fmt(ibr_row.admissible_radial_output_n,0)} N"),
+            ("PNom do catálogo", f"{fmt(ibr_row.nominal_input_cv,2)} cv"),
         ], columns=4)
         if not (ibr_perf.within_catalogue_motor_limit and ibr_perf.within_nominal_input_limit
                 and ibr_perf.within_nominal_torque_limit):
-            st.error("Entered motor exceeds a catalog limit. Select a smaller motor or a larger gearbox.")
+            st.error("O motor informado excede um limite do catálogo. Selecione um motor menor ou um redutor maior.")
         if ibr_service_status != "OK":
-            st.warning("The catalog service factor at the motor's full rated torque is below the "
-                       "selected duty-table target. The effective factor relative to the actual "
-                       "calculated base load may be higher, because the motor is not fully loaded. "
-                       "The application design factor is already included in required torque. "
-                       "Do not combine margins silently; confirm selection criterion with IBR.")
-        if coupling_mode == "Secondary chain transmission":
-            st.caption("IBR radial-force screening for a secondary chain: "
-                       "FR ≈ 2000 × M2M × 1.25 × p / Dp1; p depends on the force application point.")
-            ibr_p = st.selectbox("Application-point factor p", [1.0, 1.5], index=0,
-                                 help="Catalog p=1 or 1.5 depends on force application distance relative "
-                                      "to output shaft length. Verify actual load point; do not assume p=1.")
+            st.warning("O fator de serviço do catálogo com o torque nominal pleno do motor está abaixo do "
+                       "valor exigido pelo regime selecionado. O fator efetivo em relação à "
+                       "carga base calculada pode ser maior, pois o motor não está em plena carga. "
+                       "O fator de projeto já está incluído no torque necessário. "
+                       "Confirme com a IBR o critério de seleção e a combinação das margens.")
+        if coupling_mode == "Transmissão secundária por corrente":
+            st.caption("Verificação preliminar da força radial IBR para corrente secundária: "
+                       "FR ≈ 2000 × M2M × 1,25 × p / Dp1. O fator p depende do ponto de aplicação da força.")
+            ibr_p = st.selectbox("Fator do ponto de aplicação p", [1.0, 1.5], index=0, format_func=lambda value: fmt(value, 1),
+                                 help="No catálogo, p = 1 ou 1,5 depende da distância de aplicação da força em relação "
+                                      "ao comprimento do eixo de saída. Verifique o ponto real de aplicação antes de adotar p = 1.")
             ibr_radial_catalogue = catalogue_radial_force(
                 ibr_perf.output_torque_nm, secondary_dp1, 1.25, ibr_p)
             _, radial_catalogue_status = capacity_status(
                 ibr_row.admissible_radial_output_n, ibr_radial_catalogue)
             cell_grid([
-                ("IBR estimated FR at rated motor", f"{fmt(ibr_radial_catalogue,0)} N"),
-                ("IBR admissible FR2", f"{fmt(ibr_row.admissible_radial_output_n,0)} N"),
-                ("Catalog radial screening", "PASS" if ibr_radial_catalogue <= ibr_row.admissible_radial_output_n else "FAIL"),
+                ("FR estimada IBR com o motor nominal", f"{fmt(ibr_radial_catalogue,0)} N"),
+                ("FR2 admissível IBR", f"{fmt(ibr_row.admissible_radial_output_n,0)} N"),
+                ("Verificação radial do catálogo", "ATENDE" if ibr_radial_catalogue <= ibr_row.admissible_radial_output_n else "NÃO ATENDE"),
             ], columns=3)
-            st.caption("This is the IBR catalog's simplified radial load estimate at the selected motor rating. "
-                       "It does not replace the chain branch-tension vector model; final radial status remains REVIEW.")
-        st.caption("Catalog uses n1=1700 rpm (4-pole reference). Actual selected motor rpm changes output speed "
-                   "and calculated M2M; the efficiency and torque limit are held at catalog values as an approximation.")
-        if coupling_mode == "Direct":
-            with st.expander("IBR Q alternatives at this ratio and chosen motor power"):
+            st.caption("Esta é a estimativa simplificada de carga radial do catálogo IBR para a potência nominal selecionada. "
+                       "A análise vetorial das tensões dos ramos ainda é necessária. A situação radial final permanece EM REVISÃO.")
+        st.caption("O catálogo utiliza n1 = 1700 rpm como referência para motor de 4 polos. A rotação informada altera a rotação de saída "
+                   "e o M2M calculado. Como aproximação, o rendimento e o limite de torque permanecem nos valores do catálogo.")
+        if coupling_mode == "Direto":
+            with st.expander("Alternativas IBR Q para esta redução e potência do motor"):
                 alternatives = []
                 for size in SIZES:
                     alt_row = get_ibr_q(size, ibr_ratio)
@@ -471,24 +517,24 @@ with col_drive:
                     torque_ok = alt_perf.output_torque_nm >= conveyor.required_axis_torque_nm
                     power_ok = alt_perf.output_power_kw >= conveyor.required_axis_power_kw
                     fs_ok = alt_perf.service_factor_motor >= ibr_required_fs
-                    alt_status = "PASS*" if speed_ok and torque_ok and power_ok and fs_ok else "REVIEW"
+                    alt_status = "ATENDE*" if speed_ok and torque_ok and power_ok and fs_ok else "EM REVISÃO"
                     alternatives.append({
-                        "Model": f"IBR Q{size}", "i": f"{ibr_ratio:g}",
-                        "Motor [cv]": round(alt_motor_cv, 2),
-                        "Speed [m/min]": round(alt_speed, 2),
-                        "M2M [N·m]": round(alt_perf.output_torque_nm, 1),
-                        "M2Nom [N·m]": round(alt_row.nominal_torque_nm),
-                        "fs with motor": round(alt_perf.service_factor_motor, 2),
-                        "fs required": ibr_required_fs,
-                        "FR2 [N]": round(alt_row.admissible_radial_output_n),
-                        "Preliminary": alt_status,
+                        "Modelo": f"IBR Q{size}", "i": fmt(ibr_ratio, 0),
+                        "Motor [cv]": fmt(alt_motor_cv, 2),
+                        "Velocidade [m/min]": fmt(alt_speed, 2),
+                        "M2M [N·m]": fmt(alt_perf.output_torque_nm, 1),
+                        "M2Nom [N·m]": fmt(alt_row.nominal_torque_nm, 0),
+                        "fs com o motor": fmt(alt_perf.service_factor_motor, 2),
+                        "fs necessário": fmt(ibr_required_fs, 2),
+                        "FR2 [N]": fmt(alt_row.admissible_radial_output_n, 0),
+                        "Resultado preliminar": alt_status,
                     })
                 st.dataframe(pd.DataFrame(alternatives), hide_index=True, width="stretch")
-                st.caption("*PASS is preliminary numerical screening only; verify thermal limit, "
-                           "manufacturer selection, mounting and actual service regime. "
-                           "Motor power is limited to the smaller of the currently entered motor "
-                           "power or each catalog row's PMot maximum. "
-                           "The design factor is already included in required torque/power.")
+                st.caption("*ATENDE indica apenas uma verificação numérica preliminar. Verifique o limite térmico, "
+                           "a seleção do fabricante, a montagem e o regime real de serviço. "
+                           "A potência do motor está limitada ao menor valor entre a potência "
+                           "informada e o PMot máximo de cada linha do catálogo. "
+                           "O fator de projeto já está incluído no torque e na potência necessários.")
         effective_torque = min(ibr_perf.output_torque_nm, ibr_row.nominal_torque_nm)
         effective_power = effective_torque * 2 * pi * ibr_perf.output_rpm / 60 / 1000
         drive = DriveOutput(
@@ -497,32 +543,32 @@ with col_drive:
             reducer_output_power_kw=effective_power,
             admissible_radial_force_n=ibr_row.admissible_radial_output_n,
         )
-    elif supply_mode == "Complete gearmotor":
+    elif supply_mode == "Motoredutor completo":
         r1 = st.columns([1, 1, 2, 1])
         with r1[0]:
-            gm_manufacturer = st.text_input("Manufacturer", "SEW-EURODRIVE")
+            gm_manufacturer = st.text_input("Fabricante", "SEW-EURODRIVE")
         with r1[1]:
-            gm_model = st.text_input("Model", "")
+            gm_model = st.text_input("Modelo", "")
         with r1[2]:
             gm_motor_power = motor_power_pair("gearmotor", 15.0)
         with r1[3]:
-            gm_motor_speed = st.number_input("Motor rpm", min_value=.01,
-                                             value=1777., step=1.)
+            gm_motor_speed = number_input_pt("Rotação do motor [rpm]", min_value=.01,
+                                             value=1777., step=1., key="gearmotor_rpm")
         r2 = st.columns(4)
         with r2[0]:
-            gm_ratio = st.number_input("Ratio", min_value=.001, value=22.37, step=.01)
+            gm_ratio = number_input_pt("Redução", min_value=.001, value=22.37, step=.01)
         with r2[1]:
-            gm_output_speed = st.number_input("Output rpm", min_value=.01,
+            gm_output_speed = number_input_pt("Rotação de saída [rpm]", min_value=.01,
                                               value=79., step=1.)
         with r2[2]:
-            gm_output_torque = st.number_input("Output N·m", min_value=.01,
+            gm_output_torque = number_input_pt("Torque de saída [N·m]", min_value=.01,
                                                value=1790., step=10.)
         with r2[3]:
-            gm_radial = st.number_input("Radial limit [N]", min_value=0.,
-                                        value=15600., step=100.)
-        gm_service_factor = st.number_input(
-            "Manufacturer service factor [-]", min_value=0., value=1.50, step=.05,
-            help="Catalog factor (manufacturer-specific). Shown for reference; it is NOT a multiplier on available power or torque.",
+            gm_radial = number_input_pt("Limite radial [N]", min_value=0.,
+                                        value=15600., step=100., key="gearmotor_radial")
+        gm_service_factor = number_input_pt(
+            "Fator de serviço do fabricante [-]", min_value=0., value=1.50, step=.05,
+            help="Fator específico do catálogo do fabricante, apresentado como referência. Não multiplica a potência nem o torque disponíveis.",
         )
         drive = complete_gearmotor_output(CompleteGearmotorInput(
             manufacturer=gm_manufacturer, model=gm_model,
@@ -532,48 +578,48 @@ with col_drive:
             manufacturer_service_factor=gm_service_factor,
         ))
     else:
-        section_bar("GEARBOX")
+        section_bar("REDUTOR")
         r1 = st.columns(4)
         with r1[0]:
-            reducer_manufacturer = st.text_input("Gearbox mfr.", "Geremia")
+            reducer_manufacturer = st.text_input("Fabricante do redutor", "Geremia")
         with r1[1]:
-            reducer_model = st.text_input("Gearbox model", "GD30/2R")
+            reducer_model = st.text_input("Modelo do redutor", "GD30/2R")
         with r1[2]:
-            reducer_ratio = st.number_input("Gear ratio", min_value=.001,
+            reducer_ratio = number_input_pt("Redução do redutor", min_value=.001,
                                              value=35., step=.01)
         with r1[3]:
-            reducer_eff = st.number_input("Gear η [%]", min_value=.01,
+            reducer_eff = number_input_pt("Rendimento do redutor η [%]", min_value=.01,
                                           max_value=100., value=96., step=.5)
         r2 = st.columns(3)
         with r2[0]:
-            reducer_max_torque = st.number_input("Max torque [N·m]", min_value=0.,
+            reducer_max_torque = number_input_pt("Torque máximo [N·m]", min_value=0.,
                                                  value=370., step=10.)
         with r2[1]:
-            reducer_radial = st.number_input("Radial limit [N]", min_value=0.,
-                                             value=6300., step=100.)
+            reducer_radial = number_input_pt("Limite radial [N]", min_value=0.,
+                                             value=6300., step=100., key="separate_radial")
         with r2[2]:
-            reducer_max_power = st.number_input("Max input [kW]", min_value=0.,
+            reducer_max_power = number_input_pt("Potência máxima de entrada [kW]", min_value=0.,
                                                 value=1.50, step=.10)
         section_bar("MOTOR")
         r3 = st.columns([1, 1, 2, 1])
         with r3[0]:
-            motor_manufacturer = st.text_input("Motor mfr.", "WEG")
+            motor_manufacturer = st.text_input("Fabricante do motor", "WEG")
         with r3[1]:
-            motor_model = st.text_input("Motor model", "")
+            motor_model = st.text_input("Modelo do motor", "")
         with r3[2]:
             motor_power = motor_power_pair("separate_motor", 1.50)
         with r3[3]:
-            motor_speed = st.number_input("Motor rpm", min_value=.01,
-                                          value=1745., step=1.)
+            motor_speed = number_input_pt("Rotação do motor [rpm]", min_value=.01,
+                                          value=1745., step=1., key="separate_rpm")
         r4 = st.columns(3)
         with r4[0]:
-            motor_eff = st.number_input("Motor η [%]", min_value=.01,
+            motor_eff = number_input_pt("Rendimento do motor η [%]", min_value=.01,
                                         max_value=100., value=86.5, step=.1)
         with r4[1]:
-            nominal_freq = st.number_input("Rated Hz", min_value=.01,
+            nominal_freq = number_input_pt("Frequência nominal [Hz]", min_value=.01,
                                            value=60., step=1.)
         with r4[2]:
-            operating_freq = st.number_input("Operating Hz", min_value=.01,
+            operating_freq = number_input_pt("Frequência de operação [Hz]", min_value=.01,
                                              value=60., step=1.)
         drive = separate_drive_output(SeparateDriveInput(
             reducer_manufacturer=reducer_manufacturer, reducer_model=reducer_model,
@@ -593,310 +639,215 @@ final_output = calculate_final_output(drive, transmission, conveyor_dp)
 # 4 — REQUIRED VS AVAILABLE
 # -----------------------------------------------------------------------------
 with col_compare:
-    section_bar("4 · REQUIRED × AVAILABLE")
+    section_bar("4 · NECESSÁRIO × DISPONÍVEL")
     _, speed_state = speed_status(final_output.linear_speed_m_min, linear_speed)
     power_ratio, power_state = capacity_status(final_output.axis_power_kw,
                                                conveyor.required_axis_power_kw)
     torque_ratio, torque_state = capacity_status(final_output.axis_torque_nm,
                                                  conveyor.required_axis_torque_nm)
     rows = [
-        ("Speed", f"{fmt(linear_speed,1)} m/min",
+        ("Velocidade", f"{fmt(linear_speed,1)} m/min",
          f"{fmt(final_output.linear_speed_m_min,1)} m/min", speed_state),
-        ("Power", f"{fmt(conveyor.required_axis_power_kw,2)} kW",
+        ("Potência", f"{fmt(conveyor.required_axis_power_kw,2)} kW",
          f"{fmt(final_output.axis_power_kw,2)} kW", power_state),
         ("Torque", f"{fmt(conveyor.required_axis_torque_nm,1)} N·m",
          f"{fmt(final_output.axis_torque_nm,1)} N·m", torque_state),
     ]
-    if supply_mode == "IBR Q catalogue" and ibr_row is not None:
+    if supply_mode == "Catálogo IBR Q" and ibr_row is not None:
         # Catalog duty screening is distinct from the force/torque design margin.
-        rows.append(("IBR service factor (motor-rated)",
-                     f"{fmt(ibr_required_fs,2)} minimum",
+        rows.append(("Fator de serviço IBR com motor nominal",
+                     f"{fmt(ibr_required_fs,2)} mínimo",
                      f"{fmt(ibr_perf.service_factor_motor,2)}",
-                     "OK" if ibr_perf.service_factor_motor >= ibr_required_fs else "REVIEW"))
+                     "OK" if ibr_perf.service_factor_motor >= ibr_required_fs else "EM REVISÃO"))
         if not (ibr_perf.within_catalogue_motor_limit
                 and ibr_perf.within_nominal_input_limit
                 and ibr_perf.within_nominal_torque_limit):
-            rows.append(("Catalog input/output limits", "Within limits", "Exceeded", "FAIL"))
-    if coupling_mode == "Secondary chain transmission":
+            rows.append(("Limites de entrada e saída do catálogo", "Dentro dos limites", "Excedidos", "NÃO ATENDE"))
+    if coupling_mode == "Transmissão secundária por corrente":
         # Actual radial loading depends on tight/slack tensions and geometry.
         # Ft alone cannot prove radial compliance.
-        rows.append(("Radial load", "Not determined",
-                     f"{fmt(drive.admissible_radial_force_n,0)} N", "REVIEW"))
+        rows.append(("Carga radial", "Não determinada",
+                     f"{fmt(drive.admissible_radial_force_n,0)} N", "EM REVISÃO"))
 
     html = ['<div class="cell-grid" style="grid-template-columns:1.1fr .95fr .95fr .62fr">']
-    for label in ("Parameter", "Required", "Available", "Status"):
-        html.append(f'<div class="cell"><div class="cell-label">{escape(label)}</div>'
-                    f'<div class="cell-value">{escape(label) if label == "Parameter" else "—"}</div></div>')
+    for label in ("Parâmetro", "Necessário", "Disponível", "Situação"):
+        html.append(f'<div class="cell"><div class="cell-value">{escape(label)}</div></div>')
     for label, req_value, avail_value, status in rows:
-        for caption, value in (("Parameter", escape(label)),
-                               ("Required", escape(req_value)),
-                               ("Available", escape(avail_value)),
-                               ("Status", status_badge(status))):
+        for caption, value in (("Parâmetro", escape(label)),
+                               ("Necessário", escape(req_value)),
+                               ("Disponível", escape(avail_value)),
+                               ("Situação", status_badge(status))):
             html.append(f'<div class="cell"><div class="cell-label">{caption}</div>'
                         f'<div class="cell-value">{value}</div></div>')
     st.markdown("".join(html) + "</div>", unsafe_allow_html=True)
 
     cell_grid([
-        ("Available shaft speed", f"{fmt(final_output.axis_speed_rpm,1)} rpm"),
-        ("Available shaft torque", f"{fmt(final_output.axis_torque_nm,1)} N·m"),
-        ("Available shaft power", f"{fmt(final_output.axis_power_kw,2)} kW"),
-        ("Available linear speed", f"{fmt(final_output.linear_speed_m_min,1)} m/min"),
+        ("Rotação disponível no eixo", f"{fmt(final_output.axis_speed_rpm,1)} rpm"),
+        ("Torque disponível no eixo", f"{fmt(final_output.axis_torque_nm,1)} N·m"),
+        ("Potência disponível no eixo", f"{fmt(final_output.axis_power_kw,2)} kW"),
+        ("Velocidade linear disponível", f"{fmt(final_output.linear_speed_m_min,1)} m/min"),
     ], columns=2)
-    if coupling_mode == "Secondary chain transmission":
+    if coupling_mode == "Transmissão secundária por corrente":
         cell_grid([
-            ("Tangential force Ft (not FR)",
+            ("Força tangencial Ft (não é FR)",
              f"{fmt(final_output.radial_tangential_force_n or 0.,0)} N"),
-            ("Admissible radial load", f"{fmt(drive.admissible_radial_force_n,0)} N"),
-            ("Theoretical Ft-only Dp1",
+            ("Carga radial admissível", f"{fmt(drive.admissible_radial_force_n,0)} N"),
+            ("Dp1 teórico considerando apenas Ft",
              f"{fmt(final_output.critical_pitch_diameter_mm,1)} mm"
-             if final_output.critical_pitch_diameter_mm is not None else "N/A"),
+             if final_output.critical_pitch_diameter_mm is not None else "Não se aplica"),
         ], columns=1)
-        st.caption("Radial load remains REVIEW: Ft = T1 − T2 is not the vector sum of chain branch tensions.")
+        st.caption("A carga radial permanece EM REVISÃO: Ft = T1 − T2 não é a soma vetorial das tensões nos ramos da corrente.")
 
 # -----------------------------------------------------------------------------
 # AUXILIARY MASS CALCULATOR + GLOSSARY — preserved as collapsed sections.
 # -----------------------------------------------------------------------------
-with st.expander("Auxiliary carried-mass calculator"):
-    density = st.number_input("Material density ρ [kg/m³]", min_value=.01,
+with st.expander("Calculadora auxiliar de massa transportada"):
+    density = number_input_pt("Densidade do material ρ [kg/m³]", min_value=.01,
                               value=600., step=10., key="density")
     c1, c2 = st.columns(2)
     with c1:
-        section_bar("RECTANGULAR PRISM")
+        section_bar("PRISMA RETANGULAR")
         if IMG_PRISM:
             st.image(str(IMG_PRISM), width="stretch")
         rr = st.columns(3)
         with rr[0]:
-            l1 = st.number_input("ℓ1 [m]", value=3., step=.1, key="p_l1")
+            l1 = number_input_pt("ℓ1 [m]", value=3., step=.1, key="p_l1")
         with rr[1]:
-            l2 = st.number_input("ℓ2 [m]", value=.4, step=.01, key="p_l2")
+            l2 = number_input_pt("ℓ2 [m]", value=.4, step=.01, key="p_l2")
         with rr[2]:
-            l3 = st.number_input("ℓ3 [m]", value=.2, step=.01, key="p_l3")
+            l3 = number_input_pt("ℓ3 [m]", value=.2, step=.01, key="p_l3")
         vol, mass = rectangular_mass(l2, l3, l1, density)
         cell_grid([("Volume", f"{fmt(vol,3)} m³"),
-                   ("Mass", f"{fmt(mass,1)} kg")], columns=2)
+                   ("Massa", f"{fmt(mass,1)} kg")], columns=2)
     with c2:
-        section_bar("CYLINDER / LOG")
+        section_bar("CILINDRO / TORA")
         if IMG_CYLINDER:
             st.image(str(IMG_CYLINDER), width="stretch")
         rr = st.columns(2)
         with rr[0]:
-            d = st.number_input("Ø [m]", value=.4, step=.01, key="c_d")
+            d = number_input_pt("Ø [m]", value=.4, step=.01, key="c_d")
         with rr[1]:
-            l = st.number_input("ℓ1 [m]", value=3., step=.1, key="c_l")
+            l = number_input_pt("ℓ1 [m]", value=3., step=.1, key="c_l")
         vol, mass = cylindrical_mass(d, l, density)
         cell_grid([("Volume", f"{fmt(vol,3)} m³"),
-                   ("Mass", f"{fmt(mass,1)} kg")], columns=2)
+                   ("Massa", f"{fmt(mass,1)} kg")], columns=2)
 
-with st.expander("Engineering notes / variable glossary"):
+with st.expander("Notas de engenharia e glossário de variáveis"):
     glossary = pd.DataFrame([
-        ["C", "Conveyor center distance", "m"],
-        ["Dp", "Conveyor sprocket pitch diameter", "mm"],
-        ["q", "Linear mass of one complete chain strand", "kg/m"],
-        ["N", "Number of parallel conveyor chain strands", "—"],
-        ["m_load", "Carried material mass", "kg"],
-        ["m_top", "Mass of the chain strands in the upper straight span", "kg"],
-        ["m_ret", "Mass of the chain strands in the return span", "kg"],
-        ["m_arc", "Chain mass on both sprocket half-wraps", "kg"],
-        ["F_add", "Additional process force", "N"],
-        ["F_top", "Top friction force", "N"],
-        ["F_ret", "Guided return friction force", "N"],
-        ["s", "Sag in free return", "mm"],
-        ["μ_top", "Top friction coefficient", "—"],
-        ["μ_ret", "Return friction coefficient", "—"],
-        ["f_d", "Drive design factor", "—"],
-        ["f_B", "Catalog manufacturer service factor", "—"],
-        ["Dp1", "Reducer sprocket pitch diameter", "mm"],
-        ["Dp2", "Conveyor-shaft sprocket pitch diameter", "mm"],
-        ["α", "Conveyor inclination", "°"],
-        ["T1, T2", "Tight- and slack-side transmission chain tension", "N"],
-        ["F_R", "Resultant radial force at reducer sprocket", "N"],
-    ], columns=["Variable", "Description", "Unit"])
+        ["C", "Distância entre centros do transportador", "m"],
+        ["Dp", "Diâmetro primitivo da roda do transportador", "mm"],
+        ["q", "Massa linear de uma via completa de corrente", "kg/m"],
+        ["N", "Quantidade de vias paralelas de corrente", "—"],
+        ["m_load", "Massa do material transportado", "kg"],
+        ["m_top", "Massa das correntes no trecho reto superior", "kg"],
+        ["m_ret", "Massa das correntes no trecho de retorno", "kg"],
+        ["m_arc", "Massa das correntes nos dois semiarcos das rodas", "kg"],
+        ["F_add", "Força adicional de processo", "N"],
+        ["F_top", "Força de atrito superior", "N"],
+        ["F_ret", "Força de atrito no retorno guiado", "N"],
+        ["s", "Flecha no retorno livre", "mm"],
+        ["μ_top", "Coeficiente de atrito superior", "—"],
+        ["μ_ret", "Coeficiente de atrito no retorno", "—"],
+        ["f_d", "Fator de projeto do acionamento", "—"],
+        ["f_B", "Fator de serviço do catálogo do fabricante", "—"],
+        ["Dp1", "Diâmetro primitivo da roda do redutor", "mm"],
+        ["Dp2", "Diâmetro primitivo da roda no eixo do transportador", "mm"],
+        ["α", "Inclinação do transportador", "°"],
+        ["T1, T2", "Tensões nos ramos tenso e frouxo da corrente de transmissão", "N"],
+        ["F_R", "Força radial resultante na roda do redutor", "N"],
+    ], columns=["Variável", "Descrição", "Unidade"])
     st.dataframe(glossary, hide_index=True, width="stretch")
     st.markdown("""<div class="panel-note">
-      <b>Parallel chains:</b> force per strand assumes reasonably equal load sharing;
-      chain lengths, sprockets, guiding and tensioning must be compatible.<br>
-      <b>Structural integrity:</b> chain ultimate strength, bearing loads, tooth engagement
-      and reducer radial loading need additional checks; no structural pass is claimed.
+      <b>Correntes paralelas:</b> a força por via pressupõe uma distribuição aproximadamente uniforme da carga.
+      Os comprimentos das correntes, as rodas, as guias e o tensionamento devem ser compatíveis.<br>
+      <b>Integridade estrutural:</b> a resistência à ruptura da corrente, as cargas nos mancais, o engrenamento dos dentes
+      e a carga radial no redutor exigem verificações adicionais. Não há aprovação estrutural.
     </div>""", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # FULL EQUATION TRACE — LAST SECTION OF THE APP, COLLAPSED BY DEFAULT.
 # -----------------------------------------------------------------------------
-with st.expander("Calculation methodology · step-by-step equations and current results"):
-    st.markdown("""
-    This sequence uses the **currently selected inputs**, follows the calculation
-    functions in `src/calculations.py`, and explicitly identifies approximations.
-    It documents a **quasi-static force model plus uniform linear acceleration**;
-    sprocket inertia, shock transients, chain articulation losses and structural
-    chain strength are not yet modeled.
-    """)
-    st.markdown("**1. Geometry and chain mass**")
-    st.latex(r"m_{\mathrm{top}}=NqC\qquad m_{\mathrm{ret}}=NqL_{\mathrm{ret}}")
+with st.expander("Metodologia de cálculo · equações e resultados atuais"):
+    st.markdown("Esta sequência utiliza os dados selecionados e um modelo de forças quase estático com aceleração linear uniforme. A inércia das rodas, os choques transitórios, as perdas nas articulações e a resistência estrutural das correntes ainda não são modelados.")
+    st.caption('Notação brasileira: vírgula decimal e ponto para milhares. Exemplo: 1" = 25,4 mm.')
+    st.markdown("**1. Geometria e massa das correntes**")
+    st.latex(r"m_{sup}=NqC \qquad m_{ret}=NqL_{ret} \qquad m_{arcos}=Nq\pi D_p")
     if internal_return_type == "Guiado":
-        st.latex(r"L_{\mathrm{ret}}=C\quad\mathrm{(guided\ return)}")
+        st.latex(r"L_{ret}=C")
+        st.markdown("No retorno guiado, os comprimentos retos superior e inferior são iguais. Portanto, suas massas de corrente também são iguais.")
     else:
-        st.latex(r"L_{\mathrm{ret}}\approx C+\frac{8s^2}{3C}\quad\mathrm{(parabolic\ approximation)}")
-    st.latex(r"m_{\mathrm{arc}}=Nq\pi D_p\qquad m_{\mathrm{chains}}=m_{\mathrm{top}}+m_{\mathrm{ret}}+m_{\mathrm{arc}}")
-    st.caption(f"C={fmt(center_distance_m,5)} m; N={int(strands)}; q={fmt(chain_mass_per_m,2)} kg/m; "
-               f"L_ret={fmt(conveyor.return_length_m,4)} m; "
-               f"top={fmt(conveyor.top_chain_mass_kg,2)} kg; return={fmt(conveyor.return_chain_mass_kg,2)} kg; "
-               f"wraps={fmt(conveyor.arc_chain_mass_kg,2)} kg; TOTAL={fmt(conveyor.total_chain_mass_kg,2)} kg.")
-    st.markdown("For guided return, equal upper/lower straight lengths make their chain masses equal. "
-                "The wrap mass is counted separately; it is not part of either straight span.")
-    st.markdown("**2. Mass supported on the upper track and friction forces**")
-    st.latex(r"m_{\mathrm{supported,top}}=m_{\mathrm{load}}+m_{\mathrm{top}}")
-    st.latex(r"F_{\mathrm{top}}=\mu_{\mathrm{top}}(m_{\mathrm{load}}+m_{\mathrm{top}})g\cos\alpha")
+        st.latex(r"L_{ret}\approx C+\frac{8s^2}{3C}")
+        st.markdown("O comprimento do retorno livre utiliza uma aproximação parabólica. Nas equações, a flecha s e o diâmetro Dp são expressos em metros.")
+    st.latex(r"m_{correntes}=m_{sup}+m_{ret}+m_{arcos}")
+    st.caption(f"C = {fmt(center_distance_m,5)} m · N = {int(strands)} · q = {fmt(chain_mass_per_m,2)} kg/m · L_ret = {fmt(conveyor.return_length_m,4)} m")
+    st.caption(f"Trecho superior = {fmt(conveyor.top_chain_mass_kg,2)} kg · retorno = {fmt(conveyor.return_chain_mass_kg,2)} kg · arcos = {fmt(conveyor.arc_chain_mass_kg,2)} kg · total = {fmt(conveyor.total_chain_mass_kg,2)} kg")
+    st.markdown("**2. Massa apoiada no trecho superior e forças de atrito**")
+    st.latex(r"m_{apoiada}=m_{carga}+m_{sup} \qquad F_{sup}=\mu_{sup}m_{apoiada}g\cos\alpha")
     if internal_return_type == "Guiado":
-        st.latex(r"F_{\mathrm{ret}}=\mu_{\mathrm{ret}}m_{\mathrm{ret}}g\cos\alpha")
+        st.latex(r"F_{ret}=\mu_{ret}m_{ret}g\cos\alpha")
     else:
-        st.latex(r"F_{\mathrm{ret}}=0\quad\mathrm{(no\ guided\ sliding\ friction\ modeled)}")
-        st.markdown("The free hanging return still has tension due to its own weight; "
-                    "zero return sliding friction does **not** mean zero chain tension.")
-        st.latex(r"w=qg,\quad H\approx\frac{wC^2}{8s},\quad V\approx\frac{wC}{2},\quad T=\sqrt{H^2+V^2}")
-        st.caption(f"Catenary approximation per strand: H={fmt(conveyor.catenary_horizontal_n or 0.,1)} N; "
-                   f"V={fmt(conveyor.catenary_vertical_n or 0.,1)} N; "
-                   f"T={fmt(conveyor.catenary_tension_n or 0.,1)} N.")
-    st.caption(f"m_supported,top={fmt(conveyor.top_supported_mass_kg,2)} kg; μ_top={fmt(mu_top,2)}; "
-               f"μ_ret={fmt(mu_return,2)}; F_top={fmt(conveyor.top_friction_n,2)} N; "
-               f"F_ret={fmt(conveyor.return_friction_n,2)} N.")
-    st.markdown("**3. Inclination and steady resistance**")
-    st.latex(r"F_{\mathrm{slope}}=m_{\mathrm{load}}g\sin\alpha")
-    st.latex(r"F_{\mathrm{steady}}=F_{\mathrm{top}}+F_{\mathrm{ret}}+F_{\mathrm{slope}}+F_{\mathrm{add}}")
-    st.caption(f"F_slope={fmt(conveyor.inclination_force_n,2)} N; F_add={fmt(additional_force,2)} N; "
-               f"F_steady={fmt(conveyor.regime_force_n,2)} N.")
-    st.markdown("**4. Acceleration and moving mass**")
-    st.latex(r"v=\frac{v_{\mathrm{min}}}{60},\qquad m_{\mathrm{moving}}=m_{\mathrm{load}}+m_{\mathrm{chains}}")
-    st.latex(r"a=\frac{v}{t_a}\ \mathrm{(if\ enabled)},\qquad F_a=m_{\mathrm{moving}}a")
-    st.caption(f"v={fmt(linear_speed/60.,4)} m/s; moving mass={fmt(conveyor.moving_mass_kg,2)} kg; "
-               f"a={fmt(conveyor.acceleration_m_s2,4)} m/s²; "
-               f"F_a={fmt(conveyor.acceleration_force_n,2)} N.")
-    st.markdown("**5. Design factor (applied exactly once)**")
-    st.latex(r"F_{\mathrm{base}}=F_{\mathrm{steady}}+F_a,\quad F_{\mathrm{design}}=f_d F_{\mathrm{base}}")
-    st.latex(r"F_{\mathrm{per\ strand}}=\frac{F_{\mathrm{design}}}{N}")
-    st.caption(f"F_base={fmt(conveyor.force_before_design_factor_n,2)} N; "
-               f"f_d={fmt(design_factor,2)}; "
-               f"F_design={fmt(conveyor.design_force_n,2)} N; "
-               f"per strand={fmt(conveyor.force_per_strand_n,2)} N.")
-    st.markdown("**6. Conveyor shaft speed, torque and power**")
-    st.latex(r"n_{\mathrm{shaft}}=\frac{v_{\mathrm{min}}}{\pi D_p},\quad "
-             r"M_{\mathrm{shaft}}=F_{\mathrm{design}}\frac{D_p}{2}")
-    st.latex(r"P_{\mathrm{shaft}}=\frac{F_{\mathrm{design}}v}{1000},\quad "
-             r"P_{\mathrm{cv}}=\frac{P_{\mathrm{kW}}}{0.73549875}")
-    st.caption(f"n={fmt(conveyor.required_axis_speed_rpm,2)} rpm; "
-               f"M={fmt(conveyor.required_axis_torque_nm,2)} N·m; "
-               f"P={fmt(conveyor.required_axis_power_kw,3)} kW = "
-               f"{fmt(conveyor.required_axis_power_cv,3)} cv.")
-    st.markdown("**7. Reducer output requirement**")
+        st.latex(r"F_{ret}=0 \qquad w=qg \qquad H\approx\frac{wC^2}{8s} \qquad V\approx\frac{wC}{2} \qquad T=\sqrt{H^2+V^2}")
+        st.markdown("No retorno livre, o modelo não considera atrito de deslizamento nas guias. A corrente continua tracionada pelo próprio peso.")
+        st.caption(f"Aproximação por via: H = {fmt(conveyor.catenary_horizontal_n or 0.,1)} N · V = {fmt(conveyor.catenary_vertical_n or 0.,1)} N · T = {fmt(conveyor.catenary_tension_n or 0.,1)} N")
+    st.caption(f"Massa apoiada = {fmt(conveyor.top_supported_mass_kg,2)} kg · μ_top = {fmt(mu_top,2)} · μ_ret = {fmt(mu_return,2)} · F_top = {fmt(conveyor.top_friction_n,2)} N · F_ret = {fmt(conveyor.return_friction_n,2)} N")
+    st.markdown("**3. Inclinação e resistência em regime**")
+    st.latex(r"F_{incl}=m_{carga}g\sin\alpha \qquad F_{regime}=F_{sup}+F_{ret}+F_{incl}+F_{adicional}")
+    st.caption(f"F_incl = {fmt(conveyor.inclination_force_n,2)} N · F_adicional = {fmt(additional_force,2)} N · F_regime = {fmt(conveyor.regime_force_n,2)} N")
+    st.markdown("**4. Aceleração e massa móvel**")
+    st.latex(r"v=\frac{v_{m/min}}{60} \qquad m_{movel}=m_{carga}+m_{correntes} \qquad a=\frac{v}{t_a} \qquad F_a=m_{movel}a")
+    st.markdown("Quando a aceleração está desativada, a = 0 e F_a = 0.")
+    st.caption(f"v = {fmt(linear_speed/60.,4)} m/s · massa móvel = {fmt(conveyor.moving_mass_kg,2)} kg · a = {fmt(conveyor.acceleration_m_s2,4)} m/s² · F_a = {fmt(conveyor.acceleration_force_n,2)} N")
+    st.markdown("**5. Fator de projeto aplicado uma única vez**")
+    st.latex(r"F_{base}=F_{regime}+F_a \qquad F_{projeto}=f_dF_{base} \qquad F_{via}=\frac{F_{projeto}}{N}")
+    st.caption(f"F_base = {fmt(conveyor.force_before_design_factor_n,2)} N · f_d = {fmt(design_factor,2)} · F_projeto = {fmt(conveyor.design_force_n,2)} N · força por via = {fmt(conveyor.force_per_strand_n,2)} N")
+    st.markdown("**6. Rotação, torque e potência no eixo do transportador**")
+    st.latex(r"n_{eixo}=\frac{v_{m/min}}{\pi D_p} \qquad M_{eixo}=F_{projeto}\frac{D_p}{2}")
+    st.latex(r"P_{eixo,kW}=\frac{F_{projeto}v}{1000} \qquad P_{cv}=\frac{P_{kW}}{0{,}73549875}")
+    st.caption(f"n = {fmt(conveyor.required_axis_speed_rpm,2)} rpm · M = {fmt(conveyor.required_axis_torque_nm,2)} N·m · P = {fmt(conveyor.required_axis_power_kw,3)} kW = {fmt(conveyor.required_axis_power_cv,3)} cv")
+    st.markdown("**7. Demanda na saída do redutor**")
     if internal_coupling == "Direto":
-        st.latex(r"n_{\mathrm{red,req}}=n_{\mathrm{shaft}},\quad "
-                 r"M_{\mathrm{red,req}}=M_{\mathrm{shaft}},\quad "
-                 r"P_{\mathrm{red,req}}=P_{\mathrm{shaft}}")
+        st.latex(r"n_{red}=n_{eixo} \qquad M_{red}=M_{eixo} \qquad P_{red}=P_{eixo}")
     else:
-        st.latex(r"i_{\mathrm{sec}}=\frac{D_{p2}}{D_{p1}},\quad\eta_{\mathrm{sec}}\in(0,1]")
-        st.latex(r"n_{\mathrm{red,req}}=i_{\mathrm{sec}}n_{\mathrm{shaft}},\quad "
-                 r"M_{\mathrm{red,req}}=\frac{M_{\mathrm{shaft}}}{i_{\mathrm{sec}}\eta_{\mathrm{sec}}},\quad "
-                 r"P_{\mathrm{red,req}}=\frac{P_{\mathrm{shaft}}}{\eta_{\mathrm{sec}}}")
-    st.caption(f"Secondary ratio={fmt(requirement.ratio,4)}; "
-               f"required reducer: n={fmt(requirement.required_reducer_speed_rpm,2)} rpm; "
-               f"M={fmt(requirement.required_reducer_torque_nm,2)} N·m; "
-               f"P={fmt(requirement.required_reducer_power_kw,3)} kW.")
-    st.markdown("**8. Available drive: assumptions**")
-    if supply_mode == "IBR Q catalogue":
-        st.latex(r"i=\frac{n_1}{n_2},\qquad M_{2M}=\frac{7022\,P_{mot,cv}\,\eta}{n_2}")
-        st.latex(r"f_{s,cat}=\frac{M_{2Nom}}{M_{2M}},\qquad "
-                 r"P_{out,kW}=\frac{2\pi n_2M_{2M}}{60\,000}")
-        st.caption(f"IBR Q {ibr_row.size}; i={fmt(ibr_row.ratio,0)}; n1={fmt(ibr_motor_rpm,1)} rpm; "
-                   f"n2={fmt(ibr_perf.output_rpm,2)} rpm; motor={fmt(ibr_perf.motor_power_cv,3)} cv; "
-                   f"η={fmt(ibr_row.efficiency_pct,0)}%; "
-                   f"M2M={fmt(ibr_perf.output_torque_nm,2)} N·m; "
-                   f"M2Nom={fmt(ibr_row.nominal_torque_nm,1)} N·m; "
-                   f"fs at motor rating={fmt(ibr_perf.service_factor_motor,3)}; "
-                   f"fs by selected duty={fmt(ibr_required_fs,2)}; "
-                   f"M2Nom/Mbase={fmt(ibr_effective_fs_base,2)}; "
-                   f"M2Nom/Mdesign={fmt(ibr_effective_fs_design,2)}.")
-        st.latex(r"f_{s,load}=\frac{M_{2Nom}}{M_{red,base}},\quad "
-                 r"f_{s,design}=\frac{M_{2Nom}}{M_{red,req}},\quad "
-                 r"M_{red,base}=\frac{M_{red,req}}{f_d}")
-        st.markdown("These two diagnostic factors describe actual calculated loading and design demand, "
-                    "not the IBR catalog factor defined at full motor-rated output. "
-                    "Do not compare different definitions without stating which one applies.")
-        st.markdown("Printed IBR p.4 defines fs = M2Nom/M2M; its p.9 equation "
-                    "is reversed and conflicts with its table. Use the p.4 definition. "
-                    "The entered motor may deliver less than catalog PMot; calculate "
-                    "the service factor from the entered motor, not blindly from the tabulated PMot. "
-                    "The catalog fs criterion and the application's design factor are presented separately.")
-        st.markdown("Catalogue: IBR Q frames 075–150, ratios 30/40/50, "
-                    "user-provided PDF, printed pp.4–5 and 13–14.")
-    elif supply_mode == "Complete gearmotor":
-        st.latex(r"P_{\mathrm{red,avail}}=\frac{2\pi n_{\mathrm{out}}M_{\mathrm{out}}}{60\,000}")
-        st.caption(f"Catalog output n={fmt(gm_output_speed,2)} rpm, "
-                   f"M={fmt(gm_output_torque,2)} N·m ⇒ P={fmt(drive.reducer_output_power_kw,3)} kW. "
-                   f"Motor rating={fmt(gm_motor_power,3)} kW = {fmt(kw_to_cv(gm_motor_power),3)} cv.")
-        st.markdown("The current available-power calculation uses **catalog output torque and output speed**. "
-                    "The motor's entered rated power, ratio and manufacturer service factor are reference inputs, "
-                    "not extra power or torque multipliers. Check catalog consistency independently.")
+        st.latex(r"i_{sec}=\frac{D_{p2}}{D_{p1}} \qquad n_{red}=i_{sec}n_{eixo} \qquad M_{red}=\frac{M_{eixo}}{i_{sec}\eta_{sec}} \qquad P_{red}=\frac{P_{eixo}}{\eta_{sec}}")
+    st.caption(f"Redução secundária = {fmt(requirement.ratio,4)} · rotação necessária = {fmt(requirement.required_reducer_speed_rpm,2)} rpm · torque necessário = {fmt(requirement.required_reducer_torque_nm,2)} N·m · potência necessária = {fmt(requirement.required_reducer_power_kw,3)} kW")
+    st.markdown("**8. Acionamento disponível e hipóteses**")
+    if supply_mode == "Catálogo IBR Q":
+        st.latex(r"n_2=\frac{n_1}{i} \qquad M_{2M}=\frac{7022P_{motor,cv}\eta}{n_2} \qquad f_{s,cat}=\frac{M_{2Nom}}{M_{2M}}")
+        st.latex(r"P_{saida,kW}=\frac{2\pi n_2M_{2M}}{60000} \qquad f_{s,carga}=\frac{M_{2Nom}}{M_{red,base}} \qquad M_{red,base}=\frac{M_{red}}{f_d}")
+        st.caption(f"IBR Q{ibr_row.size} · i = {fmt(ibr_row.ratio,0)} · n1 = {fmt(ibr_motor_rpm,1)} rpm · n2 = {fmt(ibr_perf.output_rpm,2)} rpm · motor = {fmt(ibr_perf.motor_power_cv,3)} cv · η = {fmt(ibr_row.efficiency_pct,0)} %")
+        st.caption(f"M2M = {fmt(ibr_perf.output_torque_nm,2)} N·m · M2Nom = {fmt(ibr_row.nominal_torque_nm,1)} N·m · fs com motor nominal = {fmt(ibr_perf.service_factor_motor,3)} · fs necessário = {fmt(ibr_required_fs,2)} · fs da carga base = {fmt(ibr_effective_fs_base,2)} · M2Nom / torque de projeto = {fmt(ibr_effective_fs_design,2)}")
+        st.markdown("O fator do catálogo utiliza o torque de saída com potência nominal plena do motor. Os fatores relativos à carga base e à demanda de projeto têm definições distintas. A página 4 do catálogo IBR define fs = M2Nom/M2M. A equação da página 9 está invertida em relação à tabela. Adota-se a definição da página 4. O fator é recalculado para a potência informada, que pode ser inferior ao PMot tabelado.")
+        st.markdown("Fonte: PDF fornecido pelo usuário, páginas impressas 4, 5, 13 e 14. Trecho transcrito: IBR Q075 a Q150, reduções 30, 40 e 50.")
+    elif supply_mode == "Motoredutor completo":
+        st.latex(r"P_{red,kW}=\frac{2\pi n_{saida}M_{saida}}{60000}")
+        st.caption(f"Saída do catálogo: n = {fmt(gm_output_speed,2)} rpm · M = {fmt(gm_output_torque,2)} N·m · P = {fmt(drive.reducer_output_power_kw,3)} kW. Motor = {fmt(gm_motor_power,3)} kW = {fmt(kw_to_cv(gm_motor_power),3)} cv")
+        st.markdown("A potência disponível é calculada a partir do torque e da rotação de saída do catálogo. Potência nominal do motor, redução e fator de serviço são dados de referência. Verifique sua consistência no catálogo.")
     else:
-        st.latex(r"n_m=n_{m,nom}\frac{f_{op}}{f_{nom}},\quad "
-                 r"P_{m,model}=P_{m,nom}\min\left(\frac{f_{op}}{f_{nom}},1\right)")
-        st.latex(r"P_{m,lim}=\min(P_{m,model},P_{red,input,max})")
-        st.latex(r"n_{red}=\frac{n_m}{i_{red}},\quad "
-                 r"M_{red}=\min\left(\frac{9550P_{m,lim}}{n_m}i_{red}\eta_{red},M_{red,max}\right)")
-        st.markdown("The above corresponds to the existing simplified VFD model "
-                    "(constant torque below rated frequency, constant power above). "
-                    "It is **not** a validated motor capability curve. "
-                    "The motor efficiency input is currently reference-only because rated motor power "
-                    "is treated as mechanical shaft power.")
-        st.caption(f"Motor rating={fmt(motor_power,3)} kW = {fmt(kw_to_cv(motor_power),3)} cv; "
-                   f"reducer available: n={fmt(drive.reducer_output_speed_rpm,2)} rpm; "
-                   f"M={fmt(drive.reducer_output_torque_nm,2)} N·m; "
-                   f"P={fmt(drive.reducer_output_power_kw,3)} kW.")
-    st.markdown("**9. Required versus available at the conveyor shaft**")
-    st.latex(r"\lambda_M=\frac{M_{\mathrm{avail}}}{M_{\mathrm{design}}},\quad "
-             r"\lambda_P=\frac{P_{\mathrm{avail}}}{P_{\mathrm{design}}},\quad "
-             r"\delta_v=\frac{v_{\mathrm{avail}}-v_{\mathrm{desired}}}{v_{\mathrm{desired}}}")
-    st.caption(f"Torque ratio λM={fmt(torque_ratio,3)} ({torque_state}); "
-               f"power ratio λP={fmt(power_ratio,3)} ({power_state}); "
-               f"speed deviation={fmt(100*(final_output.linear_speed_m_min-linear_speed)/linear_speed,2)}% ({speed_state}).")
-    st.markdown("Current display rule: capacity ratio ≥ 1.20 ⇒ OK; "
-                "1.00–1.20 ⇒ WARNING; below 1.00 ⇒ FAIL. "
-                "Speed within ±5% ⇒ OK, otherwise REVIEW. These are interface screening "
-                "thresholds, not standards-based equipment certification.")
-    st.markdown("**10. Distinct safety/service factors**")
-    st.latex(r"f_d=\frac{F_{\mathrm{design}}}{F_{\mathrm{base}}}\quad "
-             r"\mathrm{(application\ design\ margin)}")
-    st.latex(r"f_B=\frac{M_{a,max}}{M_a}\quad\mathrm{(SEW\ catalog\ definition;\ manufacturer\ specific)}")
-    st.latex(r"SF_{\mathrm{chain}}=\frac{F_{\mathrm{breaking}}}{F_{\mathrm{working}}}\quad\mathrm{(not\ calculated)}")
-    if supply_mode == "Complete gearmotor":
-        st.caption(f"Entered manufacturer catalog service factor: {fmt(gm_service_factor,2)} (reference only).")
-    elif supply_mode == "IBR Q catalogue":
-        st.latex(r"f_{s,IBR}=\frac{M_{2Nom}}{M_{2M}}")
-        st.caption(f"IBR fs at chosen motor={fmt(ibr_perf.service_factor_motor,2)}; "
-                   f"IBR minimum by selected service regime={fmt(ibr_required_fs,2)}. "
-                   "The meaning of f_d and fs is distinct; verify whether the margins are being combined conservatively.")
-    st.markdown("The catalog factor is **not multiplied a second time** by the application design factor. "
-                "Actual manufacturer approval depends on duty classification, starts per hour, "
-                "temperature, peak loads and catalog conditions. Chain breaking strength is not entered, "
-                "so structural chain safety cannot be checked.")
-    st.markdown("**11. Secondary transmission radial load: pending model**")
+        st.latex(r"n_m=n_{m,nom}\frac{f_{op}}{f_{nom}} \qquad P_{m,modelo}=P_{m,nom}\min\left(\frac{f_{op}}{f_{nom}},1\right)")
+        st.latex(r"P_{m,lim}=\min(P_{m,modelo},P_{red,entrada,max}) \qquad n_{red}=\frac{n_m}{i_{red}}")
+        st.latex(r"M_{red}=\min\left(\frac{9550P_{m,lim}}{n_m}i_{red}\eta_{red},M_{red,max}\right)")
+        st.markdown("O modelo simplificado do inversor adota torque constante abaixo da frequência nominal e potência constante acima dela. Não representa uma curva de capacidade validada do motor. O rendimento do motor é apenas uma referência, pois a potência nominal é tratada como potência mecânica no eixo.")
+        st.caption(f"Motor = {fmt(motor_power,3)} kW = {fmt(kw_to_cv(motor_power),3)} cv · saída do redutor: n = {fmt(drive.reducer_output_speed_rpm,2)} rpm · M = {fmt(drive.reducer_output_torque_nm,2)} N·m · P = {fmt(drive.reducer_output_power_kw,3)} kW")
+    st.markdown("**9. Necessário × disponível no eixo do transportador**")
+    st.latex(r"\lambda_M=\frac{M_{disponivel}}{M_{projeto}} \qquad \lambda_P=\frac{P_{disponivel}}{P_{projeto}} \qquad \delta_v=\frac{v_{disponivel}-v_{desejada}}{v_{desejada}}")
+    st.caption(f"Relação de torque = {fmt(torque_ratio,3)} ({torque_state}) · relação de potência = {fmt(power_ratio,3)} ({power_state}) · desvio de velocidade = {fmt(100*(final_output.linear_speed_m_min-linear_speed)/linear_speed,2)} % ({speed_state})")
+    st.markdown("Critérios da interface: relação de capacidade ≥ 1,20 → OK. De 1,00 até menos de 1,20 → ATENÇÃO. Abaixo de 1,00 → NÃO ATENDE. Velocidade dentro de ±5 % → OK. Fora dessa faixa → EM REVISÃO. Esses critérios são verificações preliminares, não uma certificação normativa do equipamento.")
+    st.markdown("**10. Fatores de projeto, serviço e segurança**")
+    st.latex(r"f_d=\frac{F_{projeto}}{F_{base}} \qquad f_B=\frac{M_{a,max}}{M_a} \qquad FS_{corrente}=\frac{F_{ruptura}}{F_{trabalho}}")
+    st.markdown("O fator de projeto amplia a demanda calculada. O fator de serviço do fabricante caracteriza a capacidade do redutor segundo seu catálogo. A expressão f_B acima corresponde à definição SEW. O fator de segurança estrutural da corrente não é calculado, pois a carga de ruptura não foi informada. O fator de catálogo não é multiplicado novamente pelo fator de projeto. A aprovação do fabricante depende do regime, das partidas por hora, da temperatura, dos picos de carga e das condições do catálogo.")
+    if supply_mode == "Motoredutor completo":
+        st.caption(f"Fator de serviço informado pelo fabricante = {fmt(gm_service_factor,2)}, apenas como referência.")
+    elif supply_mode == "Catálogo IBR Q":
+        st.caption(f"fs IBR com o motor escolhido = {fmt(ibr_perf.service_factor_motor,2)} · mínimo para o regime = {fmt(ibr_required_fs,2)}. Confirme com a IBR o critério de combinação das margens.")
+    st.markdown("**11. Carga radial da transmissão secundária**")
     if internal_coupling == "Direto":
-        st.markdown("No secondary chain is selected; this app does not assess loads due to a direct coupling.")
+        st.markdown("Não há corrente secundária selecionada. O aplicativo não avalia as cargas do acoplamento direto.")
     else:
-        st.latex(r"F_t=T_1-T_2=\frac{2M_{red}}{D_{p1}}")
-        st.latex(r"\vec F_R=T_1\hat{u}_1+T_2\hat{u}_2,\quad F_R=\lVert\vec F_R\rVert")
-        st.caption(f"Current Ft-only estimate={fmt(final_output.radial_tangential_force_n or 0.,2)} N; "
-                   f"manufacturer radial limit={fmt(drive.admissible_radial_force_n,2)} N.")
-        st.warning("Actual radial load is NOT yet calculated. It requires the secondary center distance, "
-                   "branch geometry, tight/slack tensions and operating pretension assumptions. "
-                   "Theoretical Ft-only Dp1 is not a recommended diameter and cannot grant OK status.")
-        if supply_mode == "IBR Q catalogue":
-            st.latex(r"F_{R,IBR}=\frac{2000\,M_{2M}\,f_k\,p}{D_{p1,mm}}")
-            st.caption(f"IBR secondary chain f_k=1.25; p={fmt(ibr_p,1)}; "
-                       f"FR estimate at entered motor={fmt(ibr_radial_catalogue,1)} N; "
-                       f"FR2 limit={fmt(ibr_row.admissible_radial_output_n,1)} N.")
-            st.markdown("This IBR formula is a manufacturer selection approximation, "
-                        "not the resolved chain-branch tension vector. Its radial-force comparison "
-                        "is conditional on the actual load application point and bearing arrangement.")
-    st.markdown("**References:** [SEW service factor definition]"
-                "(https://download.sew-eurodrive.com/download/html/33346739/en-EN/38925667595.html) · "
-                "[SEW application service factor]"
-                "(https://download.sew-eurodrive.com/download/html/33346739/en-EN/4007542375551665968267.html)")
+        st.latex(r"F_t=T_1-T_2=\frac{2M_{red}}{D_{p1}} \qquad \vec F_R=T_1\hat u_1+T_2\hat u_2 \qquad F_R=\lVert\vec F_R\rVert")
+        st.caption(f"Estimativa apenas de Ft = {fmt(final_output.radial_tangential_force_n or 0.,2)} N · limite radial do fabricante = {fmt(drive.admissible_radial_force_n,2)} N")
+        st.warning("A carga radial real ainda não é calculada. São necessários a distância entre centros secundária, a geometria dos ramos, suas tensões e a pré-tensão de operação. O Dp1 teórico baseado apenas em Ft não é um diâmetro recomendado nem permite aprovar a carga radial.")
+        if supply_mode == "Catálogo IBR Q":
+            st.latex(r"F_{R,IBR}=\frac{2000M_{2M}f_kp}{D_{p1,mm}}")
+            st.caption(f"Corrente secundária IBR: f_k = 1,25 · p = {fmt(ibr_p,1)} · FR estimada = {fmt(ibr_radial_catalogue,1)} N · limite FR2 = {fmt(ibr_row.admissible_radial_output_n,1)} N")
+            st.markdown("A fórmula IBR é uma aproximação de seleção do fabricante. Sua comparação depende do ponto real de aplicação da carga e do arranjo dos mancais. A análise vetorial das tensões dos ramos continua necessária.")
+    st.markdown("**Referências:** [Definição do fator de serviço SEW](https://download.sew-eurodrive.com/download/html/33346739/en-EN/38925667595.html) · [Fator de serviço de aplicação SEW](https://download.sew-eurodrive.com/download/html/33346739/en-EN/4007542375551665968267.html)")

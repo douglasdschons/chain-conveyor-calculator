@@ -24,8 +24,8 @@ class FakeContext:
 
 
 class FakeStreamlit(types.ModuleType):
-    def __init__(self, return_mode="Guided return", coupling_mode="Direct",
-                 supply_mode="Complete gearmotor"):
+    def __init__(self, return_mode="Retorno guiado", coupling_mode="Direto",
+                 supply_mode="Motoredutor completo"):
         super().__init__("streamlit")
         self.session_state = {}
         self.return_mode = return_mode
@@ -51,7 +51,7 @@ class FakeStreamlit(types.ModuleType):
         return value
 
     def selectbox(self, label, options, *_, **kwargs):
-        if label == "Return type":
+        if label == "Tipo de retorno":
             return self.return_mode
         key = kwargs.get("key")
         value = options[kwargs.get("index", 0)]
@@ -61,8 +61,8 @@ class FakeStreamlit(types.ModuleType):
         return value
 
     def radio(self, label, options, *_, **__):
-        return {"Connection": self.coupling_mode,
-                "Supply mode": self.supply_mode}.get(label, options[0])
+        return {"Conexão": self.coupling_mode,
+                "Tipo de acionamento": self.supply_mode}.get(label, options[0])
 
     def toggle(self, label, *_, **kwargs):
         return kwargs.get("value", False)
@@ -81,17 +81,17 @@ class AppSmokeTests(unittest.TestCase):
     def test_all_four_input_branches(self):
         saved = sys.modules.get("streamlit")
         try:
-            for ret in ("Guided return", "Sag return"):
-                for coupling in ("Direct", "Secondary chain transmission"):
-                    for supply in ("IBR Q catalogue", "Complete gearmotor", "Separate gearbox + motor"):
+            for ret in ("Retorno guiado", "Retorno livre com flecha"):
+                for coupling in ("Direto", "Transmissão secundária por corrente"):
+                    for supply in ("Catálogo IBR Q", "Motoredutor completo", "Redutor e motor separados"):
                         with self.subTest(ret=ret, coupling=coupling, supply=supply):
                             fake = FakeStreamlit(ret, coupling, supply)
                             sys.modules["streamlit"] = fake
                             env = runpy.run_path(str(ROOT / "app.py"))
                             self.assertGreater(env["conveyor"].total_chain_mass_kg, 0)
                             self.assertGreater(env["final_output"].axis_power_kw, 0)
-                            prefix = ("ibr_motor" if supply == "IBR Q catalogue" else
-                                      "gearmotor" if supply == "Complete gearmotor" else "separate_motor")
+                            prefix = ("ibr_motor" if supply == "Catálogo IBR Q" else
+                                      "gearmotor" if supply == "Motoredutor completo" else "separate_motor")
                             self.assertIn(prefix + "_kw", fake.session_state)
                             self.assertIn(prefix + "_cv", fake.session_state)
         finally:

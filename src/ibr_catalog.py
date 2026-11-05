@@ -112,7 +112,7 @@ def evaluate_ibr_q(row: IBRQRow, motor_cv: float, motor_rpm: float = 1700.0) -> 
     efficiency/thermal/transient behavior must be confirmed with the maker.
     """
     if motor_cv <= 0 or motor_rpm <= 0:
-        raise ValueError('Motor power and speed must be positive.')
+        raise ValueError('A potência e a rotação do motor devem ser maiores que zero.')
     n2 = motor_rpm / row.ratio
     power_kw = motor_cv * CV_TO_KW
     torque = 7022.0 * motor_cv * (row.efficiency_pct / 100.0) / n2
@@ -144,9 +144,9 @@ def catalogue_radial_force(
     Check geometric definition of application point vs keyway center.
     """
     if sprocket_pitch_mm <= 0 or output_torque_nm < 0:
-        raise ValueError('Sprocket diameter must be positive and torque non-negative.')
+        raise ValueError('O diâmetro primitivo deve ser positivo e o torque não pode ser negativo.')
     if transmission_factor <= 0 or application_point_factor <= 0:
-        raise ValueError('Radial factors must be positive.')
+        raise ValueError('Os fatores da carga radial devem ser positivos.')
     return (2000.0 * output_torque_nm / sprocket_pitch_mm
             * transmission_factor * application_point_factor)
 
@@ -159,7 +159,7 @@ def candidates_for_speed(
 ) -> list[IBRQRow]:
     """Return catalog entries meeting the nominated shaft speed, direct drive ONLY."""
     if speed_m_min <= 0 or conveyor_pitch_mm <= 0 or motor_rpm <= 0:
-        raise ValueError('Positive desired speed, diameter and motor rpm required.')
+        raise ValueError('A velocidade desejada, o diâmetro e a rotação do motor devem ser positivos.')
     target_rpm = speed_m_min / (pi * conveyor_pitch_mm / 1000.0)
     return [row for row in CATALOG.values()
             if abs(motor_rpm / row.ratio / target_rpm - 1) <= tolerance_fraction]
