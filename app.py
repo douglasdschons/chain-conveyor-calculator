@@ -59,7 +59,7 @@ IMG_CYLINDER = find_asset("auxiliary cylinder")
 
 st.markdown(
     """<style>
-    :root{--border:#d9dde4;--header:#eaf2f8;--muted:#667085;--input:#f4f6f8}
+    :root{--border:#d9dde4;--header:#eaf2f8;--muted:#667085;--input:#f4f6f8;--result-blue:#163b67}
     .block-container{max-width:1500px;padding:.75rem 1rem 1.5rem}
     header[data-testid="stHeader"]{height:2rem}
     h1{font-size:1.38rem!important;line-height:1.15!important;margin:0!important}
@@ -71,23 +71,28 @@ st.markdown(
     .cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);
       padding:.34rem .46rem;min-width:0;min-height:50px;background:#fff}
     .cell-label,.result-label{font-size:.77rem;color:var(--muted);line-height:1.1rem}
-    .cell-value,.result-value{font-size:.99rem;font-weight:700;color:#1f2937;
+    .cell-value{font-size:.99rem;font-weight:700;color:#1f2937;
+      line-height:1.14rem;margin-top:.12rem;overflow-wrap:anywhere}
+    .result-value{font-size:.95rem;font-weight:500;color:var(--result-blue);
       line-height:1.14rem;margin-top:.12rem;overflow-wrap:anywhere}
     .result-field{border:1px solid var(--border);border-radius:5px;
-      background:#f4f6f8;padding:.33rem .45rem;min-height:4rem;box-sizing:border-box}
+      background:#fff;padding:.33rem .45rem;min-height:4rem;box-sizing:border-box}
     .result-field .result-label{color:#344054;min-height:1.56rem}
+    div[data-testid="stTextInput"],
+    div[data-testid="stSelectbox"]{border:1px solid var(--border);border-radius:5px;
+      padding:.28rem .38rem .18rem;background:#fff;box-sizing:border-box}
     .section-note{font-size:.77rem;color:var(--muted);line-height:1.2rem}
     div[data-testid="stVerticalBlock"]{gap:.32rem}
     div[data-testid="stHorizontalBlock"]{gap:.48rem;align-items:flex-start}
     div[data-testid="stTextInput"] label,
     div[data-testid="stSelectbox"] label,
     div[data-testid="stRadio"] label,
-    div[data-testid="stToggle"] label{font-size:.77rem!important;line-height:1rem!important;margin-bottom:.05rem!important}
+    div[data-testid="stToggle"] label{font-size:.77rem!important;line-height:1rem!important;margin-bottom:.05rem!important;color:#344054!important}
     div[data-testid="stTextInput"] input{font-size:.86rem!important;
       height:2.18rem!important;min-height:2.18rem!important;
       padding-top:.16rem!important;padding-bottom:.16rem!important;
       background:var(--input)!important}
-    div[data-testid="stSelectbox"]>div>div{min-height:2.18rem!important;font-size:.86rem!important}
+    div[data-testid="stSelectbox"]>div>div{min-height:2.18rem!important;font-size:.86rem!important;background:var(--input)!important}
     div[data-testid="stExpander"] summary{font-size:.85rem!important;font-weight:600!important}
     .power-label{font-size:.77rem;color:#344054;margin-bottom:.12rem}
     @media(max-width:900px){.block-container{padding:.5rem .55rem 1rem}
@@ -234,30 +239,30 @@ with col_sys:
         inclination_deg = (number_input_pt("α [°]", value=0., step=1.)
                            if use_inclination else 0.)
 
-    ret_cols = st.columns(3)
-    with ret_cols[0]:
+    chain_cols = st.columns(3)
+    with chain_cols[0]:
         return_mode = st.selectbox(
             "Tipo de retorno", ["Retorno guiado", "Retorno livre com flecha"]
         )
-    with ret_cols[1]:
-        if return_mode == "Retorno livre com flecha":
-            sag_mm = number_input_pt("Flecha do retorno s [mm]",
-                                     min_value=1., value=80., step=5.)
-            internal_return_type = "Livre"
-        else:
-            sag_mm = 80.
-            internal_return_type = "Guiado"
-
-    chain_cols = st.columns(3)
-    with chain_cols[0]:
+    with chain_cols[1]:
         strands = number_input_pt("Vias de corrente [-]", min_value=1,
                                   value=4, step=1)
-    with chain_cols[1]:
+    with chain_cols[2]:
         chain_mass_per_m = number_input_pt(
-            "Massa linear de uma corrente [kg/m]", min_value=.01,
+            "Massa linear da corrente [kg/m]", min_value=.01,
             value=7.30, step=.1,
             help="Massa por metro de uma via completa, inclusive corrente tripla quando aplicável."
         )
+
+    if return_mode == "Retorno livre com flecha":
+        sag_cols = st.columns(3)
+        with sag_cols[0]:
+            sag_mm = number_input_pt("Flecha do retorno s [mm]",
+                                     min_value=1., value=80., step=5.)
+        internal_return_type = "Livre"
+    else:
+        sag_mm = 80.
+        internal_return_type = "Guiado"
 
     # A linha superior reúne a carga transportada, as correntes do trecho
     # superior, sua soma (massa apoiada), o coeficiente e a força de atrito.
