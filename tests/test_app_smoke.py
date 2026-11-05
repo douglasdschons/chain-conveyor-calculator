@@ -1,8 +1,6 @@
-"""Dependency-free structural smoke check of every major UI branch.
+"""Smoke tests without installing Streamlit (fake UI facade)."""
+from __future__ import annotations
 
-This fake Streamlit facade is not a substitute for running a real Streamlit server;
-it catches missing names and wrong control flow even in CI without streamlit.
-"""
 import runpy
 import sys
 import types
@@ -31,92 +29,110 @@ class FakeStreamlit(types.ModuleType):
         self.return_mode = return_mode
         self.coupling_mode = coupling_mode
         self.supply_mode = supply_mode
+        self.html = []
+        self.radio_options = {}
+        self.text_labels = []
 
-    def columns(self, specs, **_):
-        return [FakeContext() for _ in range(specs if isinstance(specs, int) else len(specs))]
-
-    def expander(self, *_, **__):
-        return FakeContext()
+    def columns(self, spec, **_):
+        n = spec if isinstance(spec, int) else len(spec)
+        return [FakeContext() for _ in range(n)]
 
     def empty(self):
         return FakeContext()
 
-    def number_input(self, label, *_, **kwargs):
-        key = kwargs.get("key")
-        if key is not None and key in self.session_state:
-            return self.session_state[key]
-        value = kwargs.get("value", kwargs.get("min_value", 0.0))
-        if key is not None:
-            self.session_state[key] = value
-        return value
+    def expander(self, *_args, **_kwargs):
+        return FakeContext()
+
+    def toggle(self, _label, *_, **kwargs):
+        return kwargs.get("value", False)
 
     def selectbox(self, label, options, *_, **kwargs):
         if label == "Tipo de retorno":
             return self.return_mode
-        key = kwargs.get("key")
         value = options[kwargs.get("index", 0)]
+        key = kwargs.get("key")
         if key:
-            self.session_state.setdefault(key, value)
-            return self.session_state[key]
+            return self.session_state.setdefault(key, value)
         return value
 
     def radio(self, label, options, *_, **__):
+        self.radio_options[label] = options
         return {"Conexão": self.coupling_mode,
                 "Tipo de acionamento": self.supply_mode}.get(label, options[0])
 
-    def toggle(self, label, *_, **kwargs):
-        return kwargs.get("value", False)
+    def text_input(self, label, value="", *_, **kwargs):
+        self.text_labels.append(label)
+        key = kwargs.get("key")
+        return self.session_state.get(key, value) if key else value
 
-    def text_input(self, label, value="", *_, **__):
-        return value
+    def markdown(self, content, *_, **__):
+        self.html.append(content)
 
     def __getattr__(self, name):
-        if name in {"title", "set_page_config", "markdown", "image", "warning",
-                    "caption", "latex", "dataframe", "info", "error"}:
+        if name in {"title", "set_page_config", "image", "warning", "error", "caption", "stop"}:
             return lambda *_, **__: None
         raise AttributeError(name)
 
 
 class AppSmokeTests(unittest.TestCase):
-    def test_all_four_input_branches(self):
-        saved = sys.modules.get("streamlit")
+    def run_fake(self, return_mode="Retorno guiado", coupling_mode="Direto",
+                 supply_mode="Motoredutor completo"):
+        original = sys.modules.get("streamlit")
+        fake = FakeStreamlit(return_mode, coupling_mode, supply_mode)
         try:
-            for ret in ("Retorno guiado", "Retorno livre com flecha"):
-                for coupling in ("Direto", "Transmissão secundária por corrente"):
-                    for supply in ("Catálogo IBR Q", "Motoredutor completo", "Redutor e motor separados"):
-                        with self.subTest(ret=ret, coupling=coupling, supply=supply):
-                            fake = FakeStreamlit(ret, coupling, supply)
-                            sys.modules["streamlit"] = fake
-                            env = runpy.run_path(str(ROOT / "app.py"))
-                            self.assertGreater(env["conveyor"].total_chain_mass_kg, 0)
-                            self.assertGreater(env["final_output"].axis_power_kw, 0)
-                            prefix = ("ibr_motor" if supply == "Catálogo IBR Q" else
-                                      "gearmotor" if supply == "Motoredutor completo" else "separate_motor")
-                            self.assertIn(prefix + "_kw", fake.session_state)
-                            self.assertIn(prefix + "_cv", fake.session_state)
-        finally:
-            if saved is None:
-                sys.modules.pop("streamlit", None)
-            else:
-                sys.modules["streamlit"] = saved
-
-    def test_bidirectional_callback_state(self):
-        saved = sys.modules.get("streamlit")
-        try:
-            fake = FakeStreamlit()
             sys.modules["streamlit"] = fake
             env = runpy.run_path(str(ROOT / "app.py"))
-            fake.session_state["gearmotor_kw"] = 11.0
-            env["power_from_kw"]("gearmotor")
-            self.assertAlmostEqual(fake.session_state["gearmotor_cv"], 11/.73549875)
-            fake.session_state["gearmotor_cv"] = 5.0
-            env["power_from_cv"]("gearmotor")
-            self.assertAlmostEqual(fake.session_state["gearmotor_kw"], 5*.73549875)
+            return fake, env
         finally:
-            if saved is None:
+            if original is None:
                 sys.modules.pop("streamlit", None)
             else:
-                sys.modules["streamlit"] = saved
+                sys.modules["streamlit"] = original
+
+    def test_all_eight_modes(self):
+        for ret in ("Retorno guiado", "Retorno livre com flecha"):
+            for connection in ("Direto", "Transmissão secundária por corrente"):
+                for supply in ("Motoredutor completo", "Redutor e motor separados"):
+                    with self.subTest(ret=ret, connection=connection, supply=supply):
+                        fake, env = self.run_fake(ret, connection, supply)
+                        conveyor = env["conveyor"]
+                        self.assertGreater(conveyor.total_chain_mass_kg, 0)
+                        self.assertGreater(env["drive"].reducer_output_power_kw, 0)
+                        self.assertIn("gearmotor_kw" if supply == "Motoredutor completo"
+                                      else "separate_motor_kw", fake.session_state)
+                        self.assertEqual(fake.radio_options["Tipo de acionamento"],
+                                         ["Motoredutor completo", "Redutor e motor separados"])
+                        self.assertNotIn("4 · NECESSÁRIO × DISPONÍVEL", "".join(fake.html))
+                        self.assertNotIn("Metodologia de cálculo", "".join(fake.html))
+                        self.assertNotIn("Notas de engenharia e glossário", "".join(fake.html))
+
+    def test_mass_friction_logic_and_layout(self):
+        guided, env = self.run_fake()
+        c = env["conveyor"]
+        self.assertEqual(env["center_distance_m"], 4.5)
+        self.assertEqual(env["conveyor_dp"], 202.66)
+        self.assertAlmostEqual(c.top_chain_mass_kg, 131.4, places=5)
+        self.assertAlmostEqual(c.return_chain_mass_kg, 131.4, places=5)
+        self.assertAlmostEqual(c.top_supported_mass_kg, 407.4, places=5)
+        self.assertAlmostEqual(c.top_friction_n, .35 * 407.4 * 9.81, places=5)
+        self.assertAlmostEqual(c.return_friction_n, .25 * 131.4 * 9.81, places=5)
+        html = "".join(guided.html)
+        for label in ("Carga transportada", "Correntes superiores", "Massa apoiada",
+                      "Atrito superior", "Correntes do retorno", "Atrito do retorno"):
+            self.assertIn(label, html + " ".join(guided.text_labels))
+        free, env_free = self.run_fake("Retorno livre com flecha")
+        self.assertEqual(env_free["conveyor"].return_friction_n, 0)
+        self.assertNotIn("Atrito do retorno μ_ret [-]", free.text_labels)
+        self.assertNotIn("Atrito do retorno F_ret [N]", "".join(free.html))
+
+    def test_two_way_motor_power(self):
+        fake, env = self.run_fake()
+        fake.session_state["gearmotor_kw"] = 11.
+        env["power_from_kw"]("gearmotor")
+        self.assertAlmostEqual(fake.session_state["gearmotor_cv"], 11 / .73549875)
+        fake.session_state["gearmotor_cv"] = 2.5
+        env["power_from_cv"]("gearmotor")
+        self.assertAlmostEqual(fake.session_state["gearmotor_kw"], 2.5 * .73549875)
 
 
 if __name__ == "__main__":
