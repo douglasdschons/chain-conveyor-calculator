@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from html import escape
 from datetime import datetime, timezone
-from math import pi
+from math import pi, cos, radians
 from pathlib import Path
 
 import streamlit as st
@@ -966,46 +966,380 @@ with st.expander("Mapa de dependências · entradas e efeitos"):
 # =============================================================================
 # MEMORIAL DE EQUAÇÕES E DEPENDÊNCIAS — valores atuais, sem arredondar internamente
 # =============================================================================
+# =============================================================================
+# MEMORIAL PARAMÉTRICO: sequência causal, fórmulas + valores em tempo real.
+# Os resultados vêm de calculate_conveyor, não de cálculos paralelos para a UI.
+# =============================================================================
+def memorial_number(value: float, decimals: int = 2) -> str:
+    """Decimal brasileiro em LaTeX; não arredonda os valores de cálculo."""
+    number = format_number(value, decimals, grouping=False)
+    return number.replace(",", "{,}")
+
+
+def memorial_step(title: str, symbolic: str, substituted: str,
+                  observation: str | None = None) -> None:
+    st.markdown(f"**{title}**")
+    st.latex(symbolic)
+    st.latex(substituted)
+    if observation:
+        st.caption(observation)
+
+
 with st.expander("Memorial de cálculo · fórmulas e dependências"):
-    st.markdown("**1. Massas e retorno**")
-    st.latex(r"m_{sup}=N_c q C \quad m_{ret}=N_c qL_{ret} \quad m_{arcos}=N_cq\pi D_p")
-    st.caption(f"C={fmt(center_distance_m,2)} m; q={fmt(chain_mass_per_m,2)} kg/m; "
-               f"N={int(strands)}; Lret={fmt(conveyor.return_length_m,3)} m; "
-               f"m_sup={fmt(conveyor.top_chain_mass_kg,2)} kg; "
-               f"m_ret={fmt(conveyor.return_chain_mass_kg,2)} kg; "
-               f"m_arcos={fmt(conveyor.arc_chain_mass_kg,2)} kg")
-    st.markdown("**2. Resistências em regime (sem aceleração)**")
-    st.latex(r"F_{sup}=\mu_{sup}(m_{carga}+m_{sup})g\cos\alpha")
-    st.latex(r"F_{ret}=\mu_{ret}m_{ret}g\cos\alpha \quad (\mathrm{guiado})")
-    st.latex(r"F_{reg}=F_{sup}+F_{ret}+m_{carga}g\sin\alpha+F_{adicional}")
-    st.caption(f"F_sup={fmt(conveyor.top_friction_n,2)} N; F_ret={fmt(conveyor.return_friction_n,2)} N; "
-               f"F_reg={fmt(conveyor.regime_force_n,2)} N")
-    st.markdown("**3. Aceleração e demanda base**")
-    st.latex(r"a=\frac{v/60}{t_a}, \quad m_{mov}=m_{carga}+m_{correntes}, \quad F_a=m_{mov}a")
-    st.latex(r"F_{base}=F_{reg}+F_a, \quad M_{base}=F_{base}D_p/2, \quad P_{base}=F_{base}v_{m/s}/1000")
-    st.latex(r"n_{eixo}=\frac{v_{m/min}}{\pi D_p}, \quad P=\frac{2\pi n M}{60000}")
-    st.caption(f"a={fmt(conveyor.acceleration_m_s2,4)} m/s²; F_a={fmt(conveyor.acceleration_force_n,2)} N; "
-               f"F_base={fmt(conveyor.force_before_design_factor_n,2)} N; "
-               f"M_base={fmt(conveyor.required_axis_torque_nm,2)} N·m; "
-               f"P_base={fmt(conveyor.required_axis_power_kw,3)} kW; "
-               f"n={fmt(conveyor.required_axis_speed_rpm,2)} rpm")
-    st.markdown("**4. Fator de serviço aplicado somente à demanda**")
-    st.latex(r"F_{FS}=FS\,F_{base},\quad M_{FS}=FS\,M_{base},\quad P_{FS}=FS\,P_{base}")
-    st.caption(f"FS={fmt(service_factor,2)}; M_FS={fmt(corrected_torque_nm,2)} N·m; "
-               f"P_FS={fmt(corrected_power_kw,3)} kW")
-    st.markdown("**5. Transmissão e motoredutor**")
-    st.latex(r"i_{sec}=\frac{D_{p2}}{D_{p1}},\quad n_{eixo}=n_2/i_{sec},\quad M_{eixo}=M_2 i_{sec}\eta_{sec}")
-    st.latex(r"i=\frac{n_1}{n_2},\quad P_2=\frac{2\pi n_2M_2}{60000}")
-    st.caption(f"Conexão={coupling_mode}; redução secundária={fmt(requirement.ratio,3)}; "
-               f"n disponível={fmt(final_output.axis_speed_rpm,2)} rpm; "
-               f"M disponível={fmt(final_output.axis_torque_nm,2)} N·m; "
-               f"P disponível={fmt(final_output.axis_power_kw,3)} kW")
-    st.markdown("**6. Comparação**")
-    st.latex(r"R=\frac{disponivel}{requerido\ com\ FS},\quad margem=(R-1)100\%")
-    st.caption("Torque de saída e força radial admissível são informados pelo usuário. "
-               "A calculadora não atribui capacidades catalogadas à nova redução. "
-               "A análise não inclui explicitamente inércia rotacional, choques "
-               "transitórios ou resistência estrutural da corrente.")
+    m = memorial_number
+    d_m = conveyor_dp / 1000.0
+    s_m = sag_mm / 1000.0
+    v_m_s = linear_speed / 60.0
+    g = 9.81
+    # Força normal do trecho superior; a resistência resulta do modelo real.
+    n_top = conveyor.top_supported_mass_kg * g * cos(radians(inclination_deg))
+    n_ret = conveyor.return_chain_mass_kg * g * cos(radians(inclination_deg))
+    omega_req = 2.0 * pi * conveyor.required_axis_speed_rpm / 60.0
+
+    st.markdown(
+        "A sequência abaixo começa nas entradas geométricas e operacionais, "
+        "calcula as massas, obtém as forças resistentes, acrescenta a aceleração "
+        "e chega à **força, rotação, torque e potência exigidos no eixo**. "
+        "Todos os números são atualizados com os valores informados na calculadora. "
+        "As substituições numéricas são exibidas arredondadas; as operações usam precisão completa."
+    )
+    st.caption(
+        "Fluxo lógico: C, Dp, q, vias e tipo de retorno → massas das correntes → "
+        "massa apoiada + atritos → resistência em regime → aceleração → "
+        "força requerida → torque, rotação e potência → FS → "
+        "requisito do redutor → relação entre disponível e requerido."
+    )
+    st.markdown("### 0 · Dados necessários e conversões")
+    st.markdown("**Entradas do dimensionamento**")
+    st.caption(
+        f"Geometria: C = {fmt(center_distance_m,2)} m; Dp = {fmt(conveyor_dp,2)} mm; "
+        f"vias Nc = {int(strands)}; massa linear por via q = {fmt(chain_mass_per_m,2)} kg/m; "
+        f"retorno = {return_mode}."
+    )
+    st.caption(
+        f"Operação: carga mc = {fmt(load_mass,2)} kg; μsup = {fmt(mu_top,3)}; "
+        f"μret = {fmt(mu_return,3) if internal_return_type == 'Guiado' else 'não aplicável'}; "
+        f"inclinação α = {fmt(inclination_deg,2)}°; "
+        f"força adicional = {fmt(additional_force,2)} N; "
+        f"velocidade = {fmt(linear_speed,2)} m/min; "
+        f"aceleração = {'ligada' if consider_acceleration else 'desligada'}"
+        + (f"; tempo ta = {fmt(acceleration_time,2)} s." if consider_acceleration else ".")
+    )
+    memorial_step(
+        "0.1 · Diâmetro primitivo em metros (comprimentos e torque)",
+        r"D_p[\mathrm{m}]=\frac{D_p[\mathrm{mm}]}{1000}",
+        rf"D_p=\frac{{{m(conveyor_dp,2)}}}{{1000}}=\boxed{{{m(d_m,5)}\ \mathrm{{m}}}}"
+    )
+    memorial_step(
+        "0.2 · Velocidade linear em m/s (aceleração e potência)",
+        r"v[\mathrm{m/s}]=\frac{v[\mathrm{m/min}]}{60}",
+        rf"v=\frac{{{m(linear_speed,2)}}}{{60}}=\boxed{{{m(v_m_s,5)}\ \mathrm{{m/s}}}}"
+    )
+    st.caption("Adota-se aceleração gravitacional g = 9,81 m/s². "
+               "O ângulo informado em graus é convertido internamente para radianos nas funções trigonométricas.")
+
+    st.markdown("### 1 · Geometria → massas das correntes")
+    memorial_step(
+        "1.1 · Massa das correntes no trecho superior",
+        r"m_{sup}=N_c\,q\,C",
+        rf"m_{{sup}}={int(strands)}\cdot{m(chain_mass_per_m,2)}\cdot{m(center_distance_m,2)}"
+        rf"=\boxed{{{m(conveyor.top_chain_mass_kg,2)}\ \mathrm{{kg}}}}",
+        "q é a massa linear de UMA via; a quantidade Nc multiplica a massa do trecho."
+    )
+    if internal_return_type == "Guiado":
+        memorial_step(
+            "1.2 · Comprimento reto do retorno guiado",
+            r"L_{ret}=C",
+            rf"L_{{ret}}={m(center_distance_m,2)}=\boxed{{{m(conveyor.return_length_m,3)}\ \mathrm{{m}}}}",
+            "No retorno guiado os dois trechos retos têm o mesmo comprimento."
+        )
+    else:
+        memorial_step(
+            "1.2 · Comprimento aproximado do retorno livre com flecha",
+            r"s[\mathrm{m}]=s[\mathrm{mm}]/1000\qquad "
+            r"L_{ret}\approx C+\frac{8s^2}{3C}",
+            rf"L_{{ret}}\approx {m(center_distance_m,3)}+"
+            rf"\frac{{8\cdot {m(s_m,4)}^2}}{{3\cdot {m(center_distance_m,3)}}}"
+            rf"=\boxed{{{m(conveyor.return_length_m,4)}\ \mathrm{{m}}}}",
+            "Comprimento aproximado pela parábola; a flecha é convertida para metros."
+        )
+    memorial_step(
+        "1.3 · Massa das correntes no trecho inferior",
+        r"m_{ret}=N_c\,q\,L_{ret}",
+        rf"m_{{ret}}={int(strands)}\cdot{m(chain_mass_per_m,2)}\cdot{m(conveyor.return_length_m,4)}"
+        rf"=\boxed{{{m(conveyor.return_chain_mass_kg,2)}\ \mathrm{{kg}}}}"
+    )
+    memorial_step(
+        "1.4 · Massa das correntes nos arcos das rodas",
+        r"L_{arcos}=\pi D_p\qquad m_{arcos}=N_c\,q\,\pi D_p",
+        rf"m_{{arcos}}={int(strands)}\cdot{m(chain_mass_per_m,2)}\cdot\pi\cdot{m(d_m,5)}"
+        rf"=\boxed{{{m(conveyor.arc_chain_mass_kg,2)}\ \mathrm{{kg}}}}",
+        "Hipótese do modelo: duas semicircunferências de mesmo diâmetro primitivo, "
+        "equivalentes a uma circunferência por via."
+    )
+    memorial_step(
+        "1.5 · Massa total das correntes",
+        r"m_{corr}=m_{sup}+m_{ret}+m_{arcos}",
+        rf"m_{{corr}}={m(conveyor.top_chain_mass_kg,2)}+{m(conveyor.return_chain_mass_kg,2)}"
+        rf"+{m(conveyor.arc_chain_mass_kg,2)}"
+        rf"=\boxed{{{m(conveyor.total_chain_mass_kg,2)}\ \mathrm{{kg}}}}"
+    )
+
+    st.markdown("### 2 · Massas apoiadas → normais → forças de atrito")
+    memorial_step(
+        "2.1 · Massa total sobre as guias superiores",
+        r"m_{total,sup}=m_c+m_{sup}",
+        rf"m_{{total,sup}}={m(load_mass,2)}+{m(conveyor.top_chain_mass_kg,2)}"
+        rf"=\boxed{{{m(conveyor.top_supported_mass_kg,2)}\ \mathrm{{kg}}}}",
+        "Esta é uma MASSA em kg, não o peso. O peso correspondente é uma força em N."
+    )
+    memorial_step(
+        "2.2 · Força normal no trecho superior",
+        r"N_{sup}=m_{total,sup}\,g\cos\alpha",
+        rf"N_{{sup}}={m(conveyor.top_supported_mass_kg,2)}\cdot9{{,}}81\cdot"
+        rf"\cos({m(inclination_deg,2)}^\circ)"
+        rf"=\boxed{{{m(n_top,2)}\ \mathrm{{N}}}}",
+        "Na direção normal ao plano utiliza-se cosseno da inclinação."
+    )
+    memorial_step(
+        "2.3 · Atrito do trecho superior",
+        r"F_{sup}=\mu_{sup}\,N_{sup}",
+        rf"F_{{sup}}={m(mu_top,3)}\cdot{m(n_top,2)}"
+        rf"=\boxed{{{m(conveyor.top_friction_n,2)}\ \mathrm{{N}}}}"
+    )
+    if internal_return_type == "Guiado":
+        memorial_step(
+            "2.4 · Normal nas guias inferiores",
+            r"N_{ret}=m_{ret}\,g\cos\alpha",
+            rf"N_{{ret}}={m(conveyor.return_chain_mass_kg,2)}\cdot9{{,}}81\cdot"
+            rf"\cos({m(inclination_deg,2)}^\circ)"
+            rf"=\boxed{{{m(n_ret,2)}\ \mathrm{{N}}}}"
+        )
+        memorial_step(
+            "2.5 · Atrito do retorno guiado",
+            r"F_{ret}=\mu_{ret}\,N_{ret}",
+            rf"F_{{ret}}={m(mu_return,3)}\cdot{m(n_ret,2)}"
+            rf"=\boxed{{{m(conveyor.return_friction_n,2)}\ \mathrm{{N}}}}"
+        )
+    else:
+        st.markdown("**2.4 · Retorno livre: sem atrito das guias inferiores**")
+        st.latex(r"F_{ret}=0\quad (\mathrm{retorno\ sem\ guias})")
+        st.caption("A massa da corrente inferior continua no sistema móvel. "
+                   "Sua tração pela flecha é estimada a seguir, mas não é somada à força de atrito.")
+        memorial_step(
+            "2.5 · Tração aproximada da corrente suspensa, por via",
+            r"w=qg\qquad H\approx\frac{wC^2}{8s}\qquad "
+            r"V\approx\frac{wC}{2}\qquad T=\sqrt{H^2+V^2}",
+            rf"w={m(chain_mass_per_m,2)}\cdot9{{,}}81={m(chain_mass_per_m*g,2)}\ \mathrm{{N/m}},\quad"
+            rf"H={m(conveyor.catenary_horizontal_n or 0,2)}\ \mathrm{{N}},\quad"
+            rf"V={m(conveyor.catenary_vertical_n or 0,2)}\ \mathrm{{N}},\quad"
+            rf"T=\boxed{{{m(conveyor.catenary_tension_n or 0,2)}\ \mathrm{{N}}}}",
+            "Aproximação parabólica; esta tração não é igual à força motriz."
+        )
+    memorial_step(
+        "2.6 · Componente resistente associada à inclinação",
+        r"F_{incl}=m_c\,g\sin\alpha",
+        rf"F_{{incl}}={m(load_mass,2)}\cdot9{{,}}81\cdot\sin({m(inclination_deg,2)}^\circ)"
+        rf"=\boxed{{{m(conveyor.inclination_force_n,2)}\ \mathrm{{N}}}}",
+        "O modelo atual considera o peso da carga transportada nessa parcela; "
+        "não soma explicitamente outras resistências por inclinação das correntes."
+    )
+    memorial_step(
+        "2.7 · Resistência total em regime",
+        r"F_{reg}=F_{sup}+F_{ret}+F_{incl}+F_{add}",
+        rf"F_{{reg}}={m(conveyor.top_friction_n,2)}+{m(conveyor.return_friction_n,2)}"
+        rf"+{m(conveyor.inclination_force_n,2)}+{m(additional_force,2)}"
+        rf"=\boxed{{{m(conveyor.regime_force_n,2)}\ \mathrm{{N}}}}",
+        "É a força para manter velocidade constante; não inclui a aceleração."
+    )
+
+    st.markdown("### 3 · Resistência em regime + aceleração → força exigida")
+    memorial_step(
+        "3.1 · Massa total acelerada",
+        r"m_{mov}=m_c+m_{corr}",
+        rf"m_{{mov}}={m(load_mass,2)}+{m(conveyor.total_chain_mass_kg,2)}"
+        rf"=\boxed{{{m(conveyor.moving_mass_kg,2)}\ \mathrm{{kg}}}}",
+        "Inclui as correntes nos arcos; não inclui inércia rotacional de rodas, eixos e redutor."
+    )
+    if consider_acceleration:
+        memorial_step(
+            "3.2 · Aceleração linear média, partindo do repouso",
+            r"a=\frac{\Delta v}{\Delta t}=\frac{v}{t_a}",
+            rf"a=\frac{{{m(v_m_s,5)}}}{{{m(acceleration_time,2)}}}"
+            rf"=\boxed{{{m(conveyor.acceleration_m_s2,5)}\ \mathrm{{m/s^2}}}}"
+        )
+    else:
+        st.markdown("**3.2 · Aceleração desativada**")
+        st.latex(r"a=0\ \mathrm{m/s^2}")
+    memorial_step(
+        "3.3 · Força para acelerar a massa móvel",
+        r"F_a=m_{mov}\,a",
+        rf"F_a={m(conveyor.moving_mass_kg,2)}\cdot{m(conveyor.acceleration_m_s2,5)}"
+        rf"=\boxed{{{m(conveyor.acceleration_force_n,2)}\ \mathrm{{N}}}}"
+    )
+    memorial_step(
+        "3.4 · Força total requerida (sem fator de serviço)",
+        r"F_{req}=F_{reg}+F_a",
+        rf"F_{{req}}={m(conveyor.regime_force_n,2)}+{m(conveyor.acceleration_force_n,2)}"
+        rf"=\boxed{{{m(conveyor.force_before_design_factor_n,2)}\ \mathrm{{N}}}}"
+    )
+    memorial_step(
+        "3.5 · Força média por via de corrente",
+        r"F_{via}=\frac{F_{req}}{N_c}",
+        rf"F_{{via}}=\frac{{{m(conveyor.force_before_design_factor_n,2)}}}{{{int(strands)}}}"
+        rf"=\boxed{{{m(conveyor.force_per_strand_n,2)}\ \mathrm{{N}}}}",
+        "Assume distribuição uniforme entre as vias; não determina as tensões internas de cada elo."
+    )
+
+    st.markdown("### 4 · Força + diâmetro + velocidade → torque, rotação e potência")
+    memorial_step(
+        "4.1 · Raio primitivo e torque exigido no eixo",
+        r"r=\frac{D_p}{2}\qquad M_{req}=F_{req}\,r",
+        rf"M_{{req}}={m(conveyor.force_before_design_factor_n,2)}\cdot\frac{{{m(d_m,5)}}}{{2}}"
+        rf"=\boxed{{{m(conveyor.required_axis_torque_nm,2)}\ \mathrm{{N\,m}}}}",
+        "Torque exigido pelo esforço tangencial no diâmetro primitivo informado."
+    )
+    memorial_step(
+        "4.2 · Rotação exigida no eixo (v em m/min; Dp em m)",
+        r"v_{m/min}=\pi D_p\,n\qquad n_{req}=\frac{v_{m/min}}{\pi D_p}",
+        rf"n_{{req}}=\frac{{{m(linear_speed,2)}}}{{\pi\cdot{m(d_m,5)}}}"
+        rf"=\boxed{{{m(conveyor.required_axis_speed_rpm,2)}\ \mathrm{{rpm}}}}"
+    )
+    memorial_step(
+        "4.3 · Velocidade angular correspondente",
+        r"\omega=\frac{2\pi n_{req}}{60}",
+        rf"\omega=\frac{{2\pi\cdot{m(conveyor.required_axis_speed_rpm,3)}}}{{60}}"
+        rf"=\boxed{{{m(omega_req,5)}\ \mathrm{{rad/s}}}}"
+    )
+    memorial_step(
+        "4.4 · Potência mecânica exigida por força e velocidade",
+        r"P_{req}[\mathrm{kW}]=\frac{F_{req}\,v[\mathrm{m/s}]}{1000}",
+        rf"P_{{req}}=\frac{{{m(conveyor.force_before_design_factor_n,2)}\cdot{m(v_m_s,5)}}}{{1000}}"
+        rf"=\boxed{{{m(conveyor.required_axis_power_kw,4)}\ \mathrm{{kW}}}}"
+    )
+    memorial_step(
+        "4.5 · Conferência independente: torque × velocidade angular",
+        r"P_{req}=\frac{M_{req}\,\omega}{1000}=\frac{2\pi n_{req}M_{req}}{60000}",
+        rf"P_{{req}}=\frac{{{m(conveyor.required_axis_torque_nm,3)}\cdot{m(omega_req,5)}}}{{1000}}"
+        rf"\approx\boxed{{{m(conveyor.required_axis_power_kw,4)}\ \mathrm{{kW}}}}",
+        "Os dois métodos devem produzir o mesmo valor, salvo arredondamento na exibição."
+    )
+    memorial_step(
+        "4.6 · Conversão de potência de kW para cv",
+        r"P_{cv}=\frac{P_{kW}}{0{,}73549875}",
+        rf"P_{{cv}}=\frac{{{m(conveyor.required_axis_power_kw,5)}}}{{0{{,}}73549875}}"
+        rf"=\boxed{{{m(conveyor.required_axis_power_cv,4)}\ \mathrm{{cv}}}}"
+    )
+
+    st.markdown("### 5 · Fator de serviço da aplicação (fora da demanda física)")
+    memorial_step(
+        "5.1 · Demanda corrigida pelo FS escolhido",
+        r"F_{FS}=FS\,F_{req}\quad F_{via,FS}=FS\,F_{via}\quad "
+        r"M_{FS}=FS\,M_{req}\quad P_{FS}=FS\,P_{req}",
+        rf"FS={m(service_factor,3)}\ \Rightarrow\ "
+        rf"F_{{FS}}={m(corrected_force_n,2)}\ \mathrm{{N}},\quad"
+        rf"M_{{FS}}={m(corrected_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+        rf"P_{{FS}}={m(corrected_power_kw,4)}\ \mathrm{{kW}}",
+        "A velocidade e a rotação não são multiplicadas pelo FS. "
+        "O FS da aplicação não equivale ao fator de serviço informado pelo fabricante."
+    )
+
+    st.markdown("### 6 · Conexão do acionamento → requisito na saída do redutor")
+    if internal_coupling == "Direto":
+        memorial_step(
+            "6.1 · Acionamento direto",
+            r"n_{red,req}=n_{req}\quad M_{red,req}=M_{FS}\quad P_{red,req}=P_{FS}",
+            rf"n_{{red,req}}={m(corrected_reducer_requirement.required_reducer_speed_rpm,2)}\ \mathrm{{rpm}},\quad"
+            rf"M_{{red,req}}={m(corrected_reducer_requirement.required_reducer_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+            rf"P_{{red,req}}={m(corrected_reducer_requirement.required_reducer_power_kw,4)}\ \mathrm{{kW}}"
+        )
+    else:
+        eta_sec = secondary_eff / 100.0
+        memorial_step(
+            "6.1 · Relação e rendimento da transmissão secundária",
+            r"i_{sec}=\frac{D_{p2}}{D_{p1}}\qquad \eta_{sec}=\frac{\eta_{sec,\%}}{100}",
+            rf"i_{{sec}}=\frac{{{m(secondary_dp2,2)}}}{{{m(secondary_dp1,2)}}}"
+            rf"={m(requirement.ratio,4)},\quad\eta_{{sec}}={m(eta_sec,4)}"
+        )
+        memorial_step(
+            "6.2 · Rotação, torque e potência requeridos no redutor",
+            r"n_{red,req}=i_{sec}\,n_{req}\quad "
+            r"M_{red,req}=\frac{M_{FS}}{i_{sec}\eta_{sec}}\quad "
+            r"P_{red,req}=\frac{P_{FS}}{\eta_{sec}}",
+            rf"n_{{red,req}}={m(corrected_reducer_requirement.required_reducer_speed_rpm,2)}\ \mathrm{{rpm}},\quad"
+            rf"M_{{red,req}}={m(corrected_reducer_requirement.required_reducer_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+            rf"P_{{red,req}}={m(corrected_reducer_requirement.required_reducer_power_kw,4)}\ \mathrm{{kW}}"
+        )
+
+    st.markdown("### 7 · Acionamento informado → capacidade e comparação")
+    if supply_mode == "Motoredutor completo":
+        memorial_step(
+            "7.1 · Rotação de saída pela redução informada",
+            r"i=\frac{n_1}{n_2}\qquad n_2=\frac{n_1}{i}",
+            rf"n_2=\frac{{{m(gm_motor_speed,2)}}}{{{m(gm_ratio,3)}}}"
+            rf"={m(gm_output_speed,2)}\ \mathrm{{rpm}}",
+            "O valor de torque M₂ é informado pelo usuário e não é estimado a partir da redução."
+        )
+    else:
+        st.markdown("**7.1 · Redutor e motor separados**")
+        st.caption("O modelo operacional utiliza a rotação do motor ajustada pela razão "
+                   "entre frequências, a redução do redutor, o rendimento e os limites de entrada/torque informados. "
+                   "A potência elétrica de entrada não é calculada pela potência nominal do eixo do motor.")
+        st.latex(r"n_{m,op}=n_{m,nom}\frac{f_{op}}{f_{nom}}\qquad n_2=\frac{n_{m,op}}{i}")
+        st.latex(r"P_{m,lim}=\min(P_{m,modelo},P_{red,entrada,max})")
+        st.latex(r"M_2=\min\left(\frac{9550P_{m,lim}}{n_{m,op}}\,i\eta_{red},M_{red,max}\right)")
+        st.caption(f"n₂ = {fmt(drive.reducer_output_speed_rpm,2)} rpm; "
+                   f"M₂ = {fmt(drive.reducer_output_torque_nm,2)} N·m; "
+                   f"P₂ = {fmt(drive.reducer_output_power_kw,3)} kW")
+    memorial_step(
+        "7.2 · Potência mecânica disponível na saída do redutor",
+        r"P_{2}=\frac{2\pi n_2M_2}{60000}",
+        rf"P_2=\frac{{2\pi\cdot{m(drive.reducer_output_speed_rpm,3)}\cdot{m(drive.reducer_output_torque_nm,3)}}}{{60000}}"
+        rf"=\boxed{{{m(drive.reducer_output_power_kw,4)}\ \mathrm{{kW}}}}"
+    )
+    if internal_coupling != "Direto":
+        memorial_step(
+            "7.3 · Capacidade disponível transferida ao eixo do transportador",
+            r"n_{disp}=\frac{n_2}{i_{sec}}\quad "
+            r"M_{disp}=M_2i_{sec}\eta_{sec}\quad "
+            r"P_{disp}=\frac{2\pi n_{disp}M_{disp}}{60000}",
+            rf"n_{{disp}}={m(final_output.axis_speed_rpm,2)}\ \mathrm{{rpm}},\quad"
+            rf"M_{{disp}}={m(final_output.axis_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+            rf"P_{{disp}}={m(final_output.axis_power_kw,4)}\ \mathrm{{kW}}"
+        )
+    memorial_step(
+        "7.4 · Velocidade linear disponível",
+        r"v_{disp}=\pi D_p\,n_{disp}",
+        rf"v_{{disp}}=\pi\cdot{m(d_m,5)}\cdot{m(final_output.axis_speed_rpm,3)}"
+        rf"=\boxed{{{m(final_output.linear_speed_m_min,2)}\ \mathrm{{m/min}}}}"
+    )
+    st.markdown("**7.5 · Relação de capacidade, margem e situação**")
+    st.latex(r"R=\frac{X_{disp}}{X_{req,FS}}\qquad "
+             r"\mathrm{Margem}=(R-1)\,100\%")
+    for label, req, avail, ratio, margin, status, is_speed in compare_numeric:
+        if ratio is None:
+            st.caption(f"{label}: verificação não determinada ({status}).")
+        else:
+            st.caption(f"{label}: requerido = {fmt(req,3)}; disponível = {fmt(avail,3)}; "
+                       f"R = {fmt(ratio,3)}; margem = {fmt(margin,1)}%; situação = {status}.")
+    st.caption("R < 1: capacidade abaixo da demanda. Para velocidade, também se verifica "
+               "excesso sobre a velocidade desejada. Uma razão de torque adequada não "
+               "substitui a verificação da velocidade e das condições de serviço.")
+
+    st.markdown("### 8 · Premissas e limites do modelo")
+    st.markdown(
+        "- A massa linear informada corresponde a uma via completa de corrente. "
+        "A massa dos arcos pressupõe duas rodas de mesmo diâmetro primitivo.\n"
+        "- As forças de atrito usam o coeficiente equivalente informado para as superfícies. "
+        "O modelo não representa individualmente a resistência de cada rolete ou articulação.\n"
+        "- A aceleração considera massa translacional; não adiciona inércia rotacional, "
+        "impactos transitórios nem perdas não especificadas.\n"
+        "- A força por via admite repartição uniforme entre as correntes paralelas.\n"
+        "- O modelo de inclinação atual usa somente a massa da carga transportada "
+        "na componente F_incl.\n"
+        "- Torque nominal, capacidade térmica, tensões internas das correntes, "
+        "reação radial nos mancais e adequação normativa exigem verificação independente."
+    )
 
 # -----------------------------------------------------------------------------
 # CALCULADORA AUXILIAR: imagens a 50%, funcionalidade preservada
