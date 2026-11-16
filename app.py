@@ -1123,16 +1123,16 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         )
     else:
         st.markdown("**2.4 · Retorno livre: sem atrito das guias inferiores**")
-        st.latex(r"F_{ret}=0\quad (\mathrm{retorno\ sem\ guias})")
+        st.latex(r"F_{ret}=0\quad\, (\mathrm{retorno\ sem\ guias})")
         st.caption("A massa da corrente inferior continua no sistema móvel. "
                    "Sua tração pela flecha é estimada a seguir, mas não é somada à força de atrito.")
         memorial_step(
             "2.5 · Tração aproximada da corrente suspensa, por via",
             r"w=qg\qquad H\approx\frac{wC^2}{8s}\qquad "
             r"V\approx\frac{wC}{2}\qquad T=\sqrt{H^2+V^2}",
-            rf"w={m(chain_mass_per_m,2)}\cdot9{{,}}81={m(chain_mass_per_m*g,2)}\ \mathrm{{N/m}},\quad"
-            rf"H={m(conveyor.catenary_horizontal_n or 0,2)}\ \mathrm{{N}},\quad"
-            rf"V={m(conveyor.catenary_vertical_n or 0,2)}\ \mathrm{{N}},\quad"
+            rf"w={m(chain_mass_per_m,2)}\cdot9{{,}}81={m(chain_mass_per_m*g,2)}\ \mathrm{{N/m}},\quad\,"
+            rf"H={m(conveyor.catenary_horizontal_n or 0,2)}\ \mathrm{{N}},\quad\,"
+            rf"V={m(conveyor.catenary_vertical_n or 0,2)}\ \mathrm{{N}},\quad\,"
             rf"T=\boxed{{{m(conveyor.catenary_tension_n or 0,2)}\ \mathrm{{N}}}}",
             "Aproximação parabólica; esta tração não é igual à força motriz."
         )
@@ -1234,11 +1234,11 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
     st.markdown("### 5 · Fator de serviço da aplicação (fora da demanda física)")
     memorial_step(
         "5.1 · Demanda corrigida pelo FS escolhido",
-        r"F_{FS}=FS\,F_{req}\quad F_{via,FS}=FS\,F_{via}\quad "
-        r"M_{FS}=FS\,M_{req}\quad P_{FS}=FS\,P_{req}",
+        r"F_{FS}=FS\,F_{req}\quad\, F_{via,FS}=FS\,F_{via}\quad\, "
+        r"M_{FS}=FS\,M_{req}\quad\, P_{FS}=FS\,P_{req}",
         rf"FS={m(service_factor,3)}\ \Rightarrow\ "
-        rf"F_{{FS}}={m(corrected_force_n,2)}\ \mathrm{{N}},\quad"
-        rf"M_{{FS}}={m(corrected_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+        rf"F_{{FS}}={m(corrected_force_n,2)}\ \mathrm{{N}},\quad\,"
+        rf"M_{{FS}}={m(corrected_torque_nm,2)}\ \mathrm{{N\,m}},\quad\,"
         rf"P_{{FS}}={m(corrected_power_kw,4)}\ \mathrm{{kW}}",
         "A velocidade e a rotação não são multiplicadas pelo FS. "
         "O FS da aplicação não equivale ao fator de serviço informado pelo fabricante."
@@ -1248,9 +1248,9 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
     if internal_coupling == "Direto":
         memorial_step(
             "6.1 · Acionamento direto",
-            r"n_{red,req}=n_{req}\quad M_{red,req}=M_{FS}\quad P_{red,req}=P_{FS}",
-            rf"n_{{red,req}}={m(corrected_reducer_requirement.required_reducer_speed_rpm,2)}\ \mathrm{{rpm}},\quad"
-            rf"M_{{red,req}}={m(corrected_reducer_requirement.required_reducer_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+            r"n_{red,req}=n_{req}\quad\, M_{red,req}=M_{FS}\quad\, P_{red,req}=P_{FS}",
+            rf"n_{{red,req}}={m(corrected_reducer_requirement.required_reducer_speed_rpm,2)}\ \mathrm{{rpm}},\quad\,"
+            rf"M_{{red,req}}={m(corrected_reducer_requirement.required_reducer_torque_nm,2)}\ \mathrm{{N\,m}},\quad\,"
             rf"P_{{red,req}}={m(corrected_reducer_requirement.required_reducer_power_kw,4)}\ \mathrm{{kW}}"
         )
     else:
@@ -1259,15 +1259,15 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
             "6.1 · Relação e rendimento da transmissão secundária",
             r"i_{sec}=\frac{D_{p2}}{D_{p1}}\qquad \eta_{sec}=\frac{\eta_{sec,\%}}{100}",
             rf"i_{{sec}}=\frac{{{m(secondary_dp2,2)}}}{{{m(secondary_dp1,2)}}}"
-            rf"={m(requirement.ratio,4)},\quad\eta_{{sec}}={m(eta_sec,4)}"
+            rf"={m(requirement.ratio,4)},\quad\,\eta_{{sec}}={m(eta_sec,4)}"
         )
         memorial_step(
             "6.2 · Rotação, torque e potência requeridos no redutor",
-            r"n_{red,req}=i_{sec}\,n_{req}\quad "
-            r"M_{red,req}=\frac{M_{FS}}{i_{sec}\eta_{sec}}\quad "
+            r"n_{red,req}=i_{sec}\,n_{req}\quad\, "
+            r"M_{red,req}=\frac{M_{FS}}{i_{sec}\eta_{sec}}\quad\, "
             r"P_{red,req}=\frac{P_{FS}}{\eta_{sec}}",
-            rf"n_{{red,req}}={m(corrected_reducer_requirement.required_reducer_speed_rpm,2)}\ \mathrm{{rpm}},\quad"
-            rf"M_{{red,req}}={m(corrected_reducer_requirement.required_reducer_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+            rf"n_{{red,req}}={m(corrected_reducer_requirement.required_reducer_speed_rpm,2)}\ \mathrm{{rpm}},\quad\,"
+            rf"M_{{red,req}}={m(corrected_reducer_requirement.required_reducer_torque_nm,2)}\ \mathrm{{N\,m}},\quad\,"
             rf"P_{{red,req}}={m(corrected_reducer_requirement.required_reducer_power_kw,4)}\ \mathrm{{kW}}"
         )
 
@@ -1300,11 +1300,11 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
     if internal_coupling != "Direto":
         memorial_step(
             "7.3 · Capacidade disponível transferida ao eixo do transportador",
-            r"n_{disp}=\frac{n_2}{i_{sec}}\quad "
-            r"M_{disp}=M_2i_{sec}\eta_{sec}\quad "
+            r"n_{disp}=\frac{n_2}{i_{sec}}\quad\, "
+            r"M_{disp}=M_2i_{sec}\eta_{sec}\quad\, "
             r"P_{disp}=\frac{2\pi n_{disp}M_{disp}}{60000}",
-            rf"n_{{disp}}={m(final_output.axis_speed_rpm,2)}\ \mathrm{{rpm}},\quad"
-            rf"M_{{disp}}={m(final_output.axis_torque_nm,2)}\ \mathrm{{N\,m}},\quad"
+            rf"n_{{disp}}={m(final_output.axis_speed_rpm,2)}\ \mathrm{{rpm}},\quad\,"
+            rf"M_{{disp}}={m(final_output.axis_torque_nm,2)}\ \mathrm{{N\,m}},\quad\,"
             rf"P_{{disp}}={m(final_output.axis_power_kw,4)}\ \mathrm{{kW}}"
         )
     memorial_step(
