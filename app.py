@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from html import escape
 from datetime import datetime, timezone
-from math import pi, isclose
+from math import pi
 from pathlib import Path
 
 import streamlit as st
@@ -247,60 +247,9 @@ def render_schematic(image: Path | None, note: str, half_width: bool = False) ->
 
 
 # =============================================================================
-# NÚCLEO PARAMÉTRICO: cada resultado depende de entradas rastreáveis.
-# Dados IBR Q090: somente reduções 30, 40 e 50 são entradas catalogadas.
-# Fonte: catálogo IBR Q, página impressa 14 (n1 de referência = 1700 rpm).
+# COMPARAÇÃO DE CAPACIDADES. Os valores informados são tratados como entradas
+# independentes do fabricante; não existe consulta ou estimativa de catálogo.
 # =============================================================================
-IBR_Q090 = {
-    30.0: dict(pmot_cv=4.0, m2m_nm=396.5, m2nom_nm=418.0, eta_pct=80.0, fr2_n=4100.0),
-    40.0: dict(pmot_cv=3.0, m2m_nm=366.8, m2nom_nm=403.0, eta_pct=74.0, fr2_n=4580.0),
-    50.0: dict(pmot_cv=2.0, m2m_nm=297.4, m2nom_nm=360.0, eta_pct=72.0, fr2_n=4900.0),
-}
-
-
-def match_ibr_row(ratio: float):
-    """Não confundir redução arbitrária com uma combinação comercial catalogada."""
-    for key, row in IBR_Q090.items():
-        if isclose(ratio, key, rel_tol=0, abs_tol=1e-6):
-            return row
-    return None
-
-
-def estimate_reducer(motor_kw: float, motor_rpm: float, ratio: float,
-                     efficiency_pct: float) -> tuple[float, float, float]:
-    """n2=n1/i, P2=Pmotor*eta, T2=P2*60.000/(2*pi*n2)."""
-    if motor_kw <= 0 or motor_rpm <= 0 or ratio <= 0 or not (0 < efficiency_pct <= 100):
-        raise ValueError("Motor, rotação e redução precisam ser positivos; 0 < η ≤ 100%.")
-    n2 = motor_rpm / ratio
-    p2 = motor_kw * efficiency_pct / 100
-    m2 = p2 * 60000 / (2*pi*n2)
-    return n2, m2, p2
-
-
-def catalog_ibr_q090(motor_kw: float, motor_rpm: float, ratio: float) -> dict:
-    """Escala o torque M2M tabulado para a potência e a rotação informadas.
-
-    Para Pmotor ou n1 diferentes da linha IBR, o resultado é uma aproximação;
-    η e o limite de torque não representam curva ensaiada na nova condição.
-    """
-    row=match_ibr_row(ratio)
-    if row is None:
-        raise ValueError("Redução não catalogada para Q090 na tabela disponível.")
-    if motor_kw <= 0 or motor_rpm <= 0:
-        raise ValueError("Potência e rotação do motor devem ser positivas.")
-    n2 = motor_rpm / ratio
-    m2 = row['m2m_nm'] * (kw_to_cv(motor_kw)/row['pmot_cv']) * (1700.0/motor_rpm)
-    # A potência de saída parte de torque e velocidade angular; não calcular
-    # novamente com uma eficiência arredondada para evitar inconsistência.
-    p2 = m2 * 2*pi*n2 / 60000
-    return dict(n2=n2, m2=m2, p2=p2, eta_pct=100*p2/motor_kw,
-                eta_catalogue_pct=row['eta_pct'], fr2_n=row['fr2_n'],
-                m2nom_nm=row['m2nom_nm'], pmot_cv=row['pmot_cv'],
-                fs_manufacturer=row['m2nom_nm']/m2,
-                within_pmot=kw_to_cv(motor_kw)<=row['pmot_cv']+1e-9,
-                within_m2nom=m2<=row['m2nom_nm']+1e-9)
-
-
 def ratio_metrics(available: float, required: float, speed: bool = False):
     """Métrica numérica e semântica; a UI não decide com texto formatado."""
     if required <= 0:
@@ -549,151 +498,81 @@ supply_mode = st.radio(
 )
 
 if supply_mode == "Motoredutor completo":
-    # As entradas mantêm a geometria da terceira imagem: fabricante, modelo,
-    # potência em duas unidades, rpm e fator de serviço; depois i, n2, M2 e FR2.
-    gm_top = st.columns([1.0,1.0,2.0,1.05,1.05],gap="small")
+    # Campos em um único bloco, sem seleção de origem e sem catálogo embutido.
+    # As duas potências permanecem sincronizadas, mas os dados de saída são
+    # informados pelo usuário (torque e limite radial não são inferidos).
+    st.session_state.setdefault("gearmotor_kw", cv_to_kw(3.0))
+    st.session_state.setdefault("gearmotor_cv", kw_to_cv(st.session_state["gearmotor_kw"]))
+
+    gm_top = st.columns(6, gap="small")
     with gm_top[0]:
-        gm_manufacturer = st.text_input("Fabricante","IBR")
+        gm_manufacturer = st.text_input("Fabricante", "IBR")
     with gm_top[1]:
-        gm_model = st.text_input("Modelo","Q090")
+        gm_model = st.text_input("Modelo", "Q090")
     with gm_top[2]:
-        gm_motor_power = motor_power_pair("gearmotor",cv_to_kw(3.0))
+        gm_motor_power = number_input_pt(
+            "Potência nominal do motor [kW]", min_value=.001,
+            value=cv_to_kw(3.0), step=.1, format="%.3f", key="gearmotor_kw",
+            on_change=power_from_kw, args=("gearmotor",))
     with gm_top[3]:
-        gm_motor_speed = number_input_pt("Rotação nominal do motor [rpm]",
-            min_value=.01,value=1700.,step=10.,key="gearmotor_rpm",
-            on_change=_sync_manual_speed_from_ratio)
+        number_input_pt(
+            "Potência nominal do motor [cv]", min_value=.001,
+            value=3.0, step=.1, format="%.3f", key="gearmotor_cv",
+            on_change=power_from_cv, args=("gearmotor",))
+    # Captura a variável controlada após ambas as entradas.
+    gm_motor_power = float(st.session_state["gearmotor_kw"])
     with gm_top[4]:
-        manufacturer_fs_slot = st.empty()
+        gm_motor_speed = number_input_pt(
+            "Rotação nominal do motor [rpm]", min_value=.01,
+            value=1700., step=10., key="gearmotor_rpm",
+            on_change=_sync_manual_speed_from_ratio)
+    with gm_top[5]:
+        gm_service_factor = number_input_pt(
+            "FS fabricante [-]", min_value=0., value=1.10,
+            step=.05, key="gm_manual_fs")
 
-    is_ibr_q090 = (gm_manufacturer.strip().upper() == "IBR"
-                    and gm_model.strip().upper().replace(" ","").startswith("Q090"))
-    gm_modes = ["Catálogo IBR Q090", "Estimativa por rendimento", "Saída informada"]
-    gm_source = st.radio("Origem dos dados de saída",gm_modes,horizontal=True)
-    row = st.columns(4,gap="small")
-    with row[0]:
-        gm_ratio = number_input_pt("Redução i (1:i) [-]",min_value=.001,
-                                   value=40.,step=1.,format="%.3f",key="gm_ratio",
-                                   on_change=_sync_manual_speed_from_ratio)
-    with row[1]:
-        gm_n2_slot = st.empty()
-    with row[2]:
-        gm_m2_slot = st.empty()
-    with row[3]:
-        gm_radial_slot = st.empty()
+    gm_bottom = st.columns(4, gap="small")
+    with gm_bottom[0]:
+        gm_ratio = number_input_pt(
+            "Redução i (1:i) [-]", min_value=.001, value=40.,
+            step=1., format="%.3f", key="gm_ratio",
+            on_change=_sync_manual_speed_from_ratio)
+    # n2 e i são sincronizados em ambos os sentidos, sem sobrescrever M2.
+    st.session_state.setdefault("gm_manual_output_rpm", gm_motor_speed / gm_ratio)
+    with gm_bottom[1]:
+        gm_output_speed = number_input_pt(
+            "Rotação de saída [rpm]", min_value=.01,
+            value=gm_motor_speed / gm_ratio, step=1.,
+            key="gm_manual_output_rpm", on_change=_sync_manual_ratio_from_speed)
+    with gm_bottom[2]:
+        gm_output_torque = number_input_pt(
+            "Torque informado [N·m]", min_value=.01,
+            value=366.8, step=10., key="gm_manual_torque")
+    with gm_bottom[3]:
+        gm_radial = number_input_pt(
+            "Limite radial informado [N]", min_value=0.,
+            value=4580., step=100., key="gm_manual_radial")
 
-    gm_catalog_row = None
-    gm_catalog_valid = False
-    gm_eff_used = None
-    gm_pmot_cv = None
-    gm_m2nom = None
-    gm_service_factor = None
-    gm_mode_detail = ""
-    catalog_allowed = gm_source == "Catálogo IBR Q090" and is_ibr_q090
-    if catalog_allowed:
-        gm_catalog_row = match_ibr_row(gm_ratio)
-        gm_catalog_valid = gm_catalog_row is not None
-    if gm_source == "Catálogo IBR Q090" and not is_ibr_q090:
-        st.warning("O catálogo incorporado corresponde apenas ao fabricante IBR e modelo Q090. "
-                   "Aplicando estimativa por rendimento, sem atribuir certificação do catálogo.")
-
-    if gm_catalog_valid:
-        result = catalog_ibr_q090(gm_motor_power,gm_motor_speed,gm_ratio)
-        gm_output_speed=result['n2']
-        gm_output_torque=result['m2']
-        gm_output_power=result['p2']
-        gm_radial=result['fr2_n']
-        gm_service_factor=result['fs_manufacturer']
-        gm_eff_used=result['eta_pct']
-        gm_m2nom=result['m2nom_nm']
-        gm_pmot_cv=result['pmot_cv']
-        gm_mode_detail="CATÁLOGO Q090 (linha existente)"
-        if not result['within_pmot'] or not result['within_m2nom']:
-            st.error("A seleção ultrapassa o motor PMot recomendado ou o torque M2Nom da linha IBR. "
-                     "Os resultados não constituem uma seleção aprovada.")
-        with row[1]:
-            with gm_n2_slot.container():
-                calculated_field("Rotação de saída [rpm]",f"{fmt(gm_output_speed,2)} rpm")
-        with row[2]:
-            with gm_m2_slot.container():
-                calculated_field("Torque de saída [N·m]",f"{fmt(gm_output_torque,2)} N·m")
-        with row[3]:
-            with gm_radial_slot.container():
-                calculated_field("FR2 admissível [N]",f"{fmt(gm_radial,0)} N")
-        st.caption(f"η tabulado: {fmt(gm_catalog_row['eta_pct'],1)} % · "
-                   f"M2Nom: {fmt(gm_m2nom,1)} N·m · PMot: {fmt(gm_pmot_cv,1)} cv. "
-                   "Potência e rotação diferentes da linha são aproximações."
-        )
-    elif gm_source == "Saída informada":
-        # O usuário fornece o torque do catálogo escolhido. Não se deve inventar
-        # como o torque comercial varia com uma redução ainda não catalogada.
-        st.session_state.setdefault('gm_manual_output_rpm',gm_motor_speed/gm_ratio)
-        with row[1]:
-            with gm_n2_slot.container():
-                gm_output_speed = number_input_pt("Rotação de saída [rpm]",
-                    min_value=.01,value=gm_motor_speed/gm_ratio,step=1.,
-                    key='gm_manual_output_rpm',on_change=_sync_manual_ratio_from_speed)
-        with row[2]:
-            with gm_m2_slot.container():
-                gm_output_torque = number_input_pt("Torque informado [N·m]",
-                    min_value=.01,value=366.8,step=10.,key='gm_manual_torque')
-        with row[3]:
-            with gm_radial_slot.container():
-                gm_radial = number_input_pt("Limite radial informado [N]",
-                    min_value=0.,value=4580.,step=100.,key='gm_manual_radial')
-        with manufacturer_fs_slot.container():
-            gm_service_factor = number_input_pt("FS fabricante [-]",
-                min_value=0.,value=1.10,step=.05,key="gm_manual_fs")
-        gm_output_power = gm_output_torque*2*pi*gm_output_speed/60000
-        gm_eff_used=100*gm_output_power/gm_motor_power
-        gm_mode_detail="SAÍDA INFORMADA (torque independente do modelo)"
-        # Usa os dois campos de forma bidirecional por callback. Se valores foram
-        # alterados programaticamente sem passar pelo widget, avisar sem inventar T.
-        if abs(gm_motor_speed/gm_ratio/gm_output_speed-1)>0.01:
-            st.warning("Dados inconsistentes: n2 deve ser aproximadamente n1/i. "
-                       "Edite i ou n2 para sincronizar as entradas.")
-        if gm_output_power>gm_motor_power+1e-9:
-            st.error("O torque/rotação informados exigem mais potência de saída que a potência "
-                     "nominal do motor. Verifique os dados do fabricante.")
-        st.caption("Torque e FR2 são dados de entrada independentes do fabricante. "
-                   "Alterar i sincroniza n2 e recalcula a potência mecânica. "
-                   "**Não é possível deduzir outro torque de catálogo sem dados de rendimento/limites.**")
-    else:
-        if gm_source == "Catálogo IBR Q090":
-            st.warning(f"A redução 1:{fmt(gm_ratio,3)} não consta da tabela Q090 disponível "
-                       "(30, 40 e 50). Abaixo, cálculo estimado com rendimento informado, "
-                       "sem M2Nom ou FR2 homologados.")
-        gm_eff_input = number_input_pt("Rendimento estimado η [%]",
-            min_value=.01,max_value=100.,value=74.,step=1.,key='gm_eta_estimada')
-        gm_output_speed,gm_output_torque,gm_output_power=estimate_reducer(
-            gm_motor_power,gm_motor_speed,gm_ratio,gm_eff_input)
-        gm_eff_used=gm_eff_input
-        gm_mode_detail="ESTIMATIVA: n2=n1/i, P2=Pmotor×η, M2=P2/ω2"
-        with row[1]:
-            with gm_n2_slot.container():
-                calculated_field("Rotação de saída [rpm]",f"{fmt(gm_output_speed,2)} rpm")
-        with row[2]:
-            with gm_m2_slot.container():
-                calculated_field("Torque estimado [N·m]",f"{fmt(gm_output_torque,2)} N·m")
-        with row[3]:
-            with gm_radial_slot.container():
-                gm_radial = number_input_pt("FR2 informado [N] (0 = não informado)",
-                    min_value=0.,value=0.,step=100.,key='gm_radial_estimada')
-        st.caption("Se η e Pmotor permanecerem constantes, alterar i modifica n2 e M2, "
-                   "mas não P2. η somente varia automaticamente nas linhas catalogadas. "
-                   "Uma redução fora do catálogo precisa de verificação do fabricante.")
-    if gm_source != "Saída informada":
-        with manufacturer_fs_slot.container():
-            if gm_service_factor is None:
-                calculated_field("FS fabricante [-]","Não disponível")
-            else:
-                calculated_field("FS fabricante [-]",fmt(gm_service_factor,2))
+    gm_output_power = gm_output_torque * 2 * pi * gm_output_speed / 60000
+    gm_eff_used = (100 * gm_output_power / gm_motor_power
+                   if gm_motor_power > 0 else None)
+    gm_mode_detail = "DADOS DE SAÍDA INFORMADOS PELO USUÁRIO"
+    if abs(gm_motor_speed / gm_ratio / gm_output_speed - 1) > 0.01:
+        st.warning("Inconsistência entre n1, i e n2. Confira os dados informados.")
+    if gm_output_power > gm_motor_power + 1e-9:
+        st.error("Os valores informados de torque e rotação exigem potência "
+                 "de saída superior à potência nominal do motor.")
+    st.caption("A redução e a rotação de saída são sincronizadas (n₂ = n₁/i). "
+               "Torque e limite radial são dados informados do fabricante; "
+               "a potência mecânica de saída é calculada por P₂ = M₂·2πn₂/60.000.")
 
     drive = complete_gearmotor_output(CompleteGearmotorInput(
-        manufacturer=gm_manufacturer,model=gm_model,
-        motor_power_kw=gm_motor_power,motor_speed_rpm=gm_motor_speed,
-        output_speed_rpm=gm_output_speed,total_ratio=gm_ratio,
-        output_torque_nm=gm_output_torque,admissible_radial_force_n=gm_radial,
-        manufacturer_service_factor=gm_service_factor or 0.,
+        manufacturer=gm_manufacturer, model=gm_model,
+        motor_power_kw=gm_motor_power, motor_speed_rpm=gm_motor_speed,
+        output_speed_rpm=gm_output_speed, total_ratio=gm_ratio,
+        output_torque_nm=gm_output_torque,
+        admissible_radial_force_n=gm_radial,
+        manufacturer_service_factor=gm_service_factor,
     ))
 
 else:
@@ -851,9 +730,6 @@ for row,(label,req,avail,r,m,state) in zip(compare_numeric,compare_rows):
     html.append('</tr>')
 html.append('</tbody></table></div>')
 st.markdown(''.join(html),unsafe_allow_html=True)
-if supply_mode=='Motoredutor completo' and not gm_catalog_valid and gm_source != 'Saída informada':
-    st.warning('Relações de capacidade numéricas baseadas em rendimento estimado. ' 
-               'Não validam a existência comercial nem os limites térmicos/mecânicos do conjunto.')
 st.caption('R = disponível / requerido com FS. R < 1: os valores R, margem e situação ficam em vermelho. '
            'Velocidade acima da meta em mais de 5% também exige ajuste; potência e torque são critérios distintos.')
 if internal_coupling != 'Direto':
@@ -1004,13 +880,12 @@ report_sections = [
         ("Tipo", supply_mode),
         *(([("Fabricante do motoredutor", gm_manufacturer),
             ("Modelo do motoredutor", gm_model),
-            ("Origem dos dados", gm_source),
             ("Potência nominal do motor", f"{fmt(gm_motor_power,3)} kW / {fmt(kw_to_cv(gm_motor_power),3)} cv"),
             ("Rotação nominal do motor", f"{fmt(gm_motor_speed,2)} rpm"),
             ("Relação de redução", fmt(gm_ratio,3)),
             ("Fator de serviço do fabricante", fmt(gm_service_factor,2) if gm_service_factor is not None else "Não informado"),
             ("Critério de cálculo do acionamento",gm_mode_detail),
-            ("Rendimento inferido/assumido",f"{fmt(gm_eff_used,2)} %" if gm_eff_used is not None else "Não informado") ]
+            ("Potência de saída implícita / potência do motor",f"{fmt(gm_eff_used,2)} %" if gm_eff_used is not None else "Não informado") ]
            if supply_mode == "Motoredutor completo" else [
             ("Fabricante do redutor", reducer_manufacturer),
             ("Modelo do redutor", reducer_model),
@@ -1034,8 +909,9 @@ report_sections = [
 report_notes = [
     "Dependências: alterar massa, atrito ou distância entre centros propaga as alterações para as forças e demanda. "
     "Alterar Dp também altera a massa dos arcos, a rotação requerida e a velocidade linear disponível.",
-    "Redução: n2=n1/i. Com Pmotor e η constantes, P2=Pmotor×η permanece constante e M2 muda inversamente com n2. "
-    "P2 muda quando Pmotor, η ou limites aplicáveis mudam. No catálogo Q090, η depende da redução catalogada.",
+    "Saída informada: n2=n1/i; M2 e FR2 são dados independentes fornecidos pelo usuário. "
+    "P2 = 2πn2M2/60000 (kW) e muda com n2 quando M2 é mantido constante. "
+    "Não é possível obter automaticamente o torque nominal de outra redução sem dados do fabricante.",
     "Equações: m_sup=N×q×C; m_ret=N×q×C (guiado); m_arcos=N×q×π×Dp; m_móvel=m_carga+m_correntes.",
     "Atrito: F_sup=μ_sup×(m_carga+m_sup)×g×cos(α); F_ret=μ_ret×m_ret×g×cos(α).",
     "Demanda: F_base=F_regime+F_aceleração; F_aceleração=m_móvel×v/t_aceleração; M_base=F_base×Dp/2; P_base=F_base×v/1000.",
@@ -1076,14 +952,16 @@ with st.expander("Mapa de dependências · entradas e efeitos"):
 | Carga, μ superior, μ retorno, tipo de retorno, inclinação, F adicional | Forças resistentes, força de projeto base, torque e potência requeridos |
 | Velocidade desejada, tempo de aceleração, aceleração ligada/desligada | Aceleração, força total, potência, rotação requerida e comparação |
 | FS da aplicação | Somente força, torque e potência requeridos corrigidos, relação e margem (não altera velocidade) |
-| Potência do motor (kW ou cv), rotação do motor, i, rendimento | Rotação de saída, torque, potência de saída conforme η, velocidade linear e comparação |
-| Linha catalogada Q090 30/40/50 | Rendimento de referência, torque, potência, rotação, FS fabricante, FR2 e comparação |
+| Potência nominal do motor (kW ou cv) | Atualiza a unidade vinculada e a verificação de coerência de potência; não inventa torque ou rendimento do redutor |
+| Rotação do motor, i ou rotação de saída | Sincronizam n2 = n1/i; atualizam a potência derivada de n2 e M2, a velocidade linear e a comparação |
+| Torque de saída informado | Atualiza potência de saída, capacidade e comparação; não altera a redução |
+| FS do fabricante, limite radial informado | Atualizam apenas os respectivos dados e verificações pertinentes |
 | Dp1, Dp2, η da corrente secundária | Relação da transmissão, rotação/torque/potência no eixo e no redutor, comparação |
 | Torque/FR2 da saída informada | Potência derivada e verificação; FR2 altera somente o limite de carga radial |
 """)
-    st.caption("Uma variável independente não deve ser modificada artificialmente. "
-               "Exemplo: com η e potência do motor constantes, mudar i altera o torque e a "
-               "rotação, mas preserva a potência de saída.")
+    st.caption("No modo de saída informada, o torque não é recalculado por hipótese: "
+               "ao mudar i, n2 e a potência implícita mudam para o torque informado. "
+               "A especificação de um novo torque deve vir do fabricante.")
 
 # =============================================================================
 # MEMORIAL DE EQUAÇÕES E DEPENDÊNCIAS — valores atuais, sem arredondar internamente
@@ -1117,16 +995,17 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
                f"P_FS={fmt(corrected_power_kw,3)} kW")
     st.markdown("**5. Transmissão e motoredutor**")
     st.latex(r"i_{sec}=\frac{D_{p2}}{D_{p1}},\quad n_{eixo}=n_2/i_{sec},\quad M_{eixo}=M_2 i_{sec}\eta_{sec}")
-    st.latex(r"i=\frac{n_1}{n_2},\quad P_2=P_{motor}\eta_{red},\quad M_2=\frac{60000P_2}{2\pi n_2}")
+    st.latex(r"i=\frac{n_1}{n_2},\quad P_2=\frac{2\pi n_2M_2}{60000}")
     st.caption(f"Conexão={coupling_mode}; redução secundária={fmt(requirement.ratio,3)}; "
                f"n disponível={fmt(final_output.axis_speed_rpm,2)} rpm; "
                f"M disponível={fmt(final_output.axis_torque_nm,2)} N·m; "
                f"P disponível={fmt(final_output.axis_power_kw,3)} kW")
     st.markdown("**6. Comparação**")
     st.latex(r"R=\frac{disponivel}{requerido\ com\ FS},\quad margem=(R-1)100\%")
-    st.caption("A capacidade do catálogo é uma condição de seleção, não uma relação que se "
-               "possa extrapolar para qualquer redução. A análise não inclui explicitamente "
-               "inércia rotacional, choques transitórios ou resistência estrutural da corrente.")
+    st.caption("Torque de saída e força radial admissível são informados pelo usuário. "
+               "A calculadora não atribui capacidades catalogadas à nova redução. "
+               "A análise não inclui explicitamente inércia rotacional, choques "
+               "transitórios ou resistência estrutural da corrente.")
 
 # -----------------------------------------------------------------------------
 # CALCULADORA AUXILIAR: imagens a 50%, funcionalidade preservada
