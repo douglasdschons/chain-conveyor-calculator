@@ -6,9 +6,6 @@ centralizado em src/calculations.py. Imagens originais não são modificadas.
 from __future__ import annotations
 
 from html import escape
-import base64
-import json
-import re
 from datetime import datetime, timezone
 from math import pi, cos, radians
 from pathlib import Path
@@ -218,22 +215,6 @@ def power_from_cv(prefix: str) -> None:
     st.session_state[f"{prefix}_kw"] = cv_to_kw(st.session_state[f"{prefix}_cv"])
 
 
-def sync_gm_speed_from_ratio() -> None:
-    """Ao alterar a redução ou n1, atualiza n2 sem estimar novo torque de catálogo."""
-    ratio = float(st.session_state.get("gm_ratio", 35.91))
-    rpm = float(st.session_state.get("gm_motor_rpm", 1700.0))
-    if ratio > 0 and rpm > 0:
-        st.session_state["gm_n2"] = rpm / ratio
-
-
-def sync_gm_ratio_from_speed() -> None:
-    """Ao digitar n2, recalcula a relação i, preservando n1 e M2M catalogados."""
-    rpm = float(st.session_state.get("gm_motor_rpm", 1700.0))
-    n2 = float(st.session_state.get("gm_n2", 0))
-    if rpm > 0 and n2 > 0:
-        st.session_state["gm_ratio"] = rpm / n2
-
-
 def motor_power_pair(prefix: str, default_kw: float) -> float:
     key_kw, key_cv = f"{prefix}_kw", f"{prefix}_cv"
     st.session_state.setdefault(key_kw, default_kw)
@@ -283,6 +264,21 @@ def ratio_metrics(available: float, required: float, speed: bool = False):
         state = "ATENDE"
     return ratio,margin,state
 
+
+def _sync_manual_speed_from_ratio() -> None:
+    """Usuário alterou i: a saída manual segue a cinemática n2=n1/i."""
+    rpm = float(st.session_state.get('gearmotor_rpm',1700.0))
+    ratio = float(st.session_state.get('gm_ratio',40.0))
+    if rpm>0 and ratio>0:
+        st.session_state['gm_manual_output_rpm'] = rpm/ratio
+
+
+def _sync_manual_ratio_from_speed() -> None:
+    """Usuário alterou n2: a razão cinemática passa a i=n1/n2."""
+    rpm = float(st.session_state.get('gearmotor_rpm',1700.0))
+    n2 = float(st.session_state.get('gm_manual_output_rpm',42.5))
+    if rpm>0 and n2>0:
+        st.session_state['gm_ratio'] = rpm/n2
 
 st.title("Calculadora de transportadores de correntes")
 st.markdown('<div class="section-note">Demanda do sistema · cálculo paramétrico · especificação do acionamento</div>',
@@ -484,7 +480,7 @@ with col_connection:
     cell_grid([
         ("Rotação necessária no redutor", f"{fmt(requirement.required_reducer_speed_rpm,1)} rpm"),
         ("Torque necessário no redutor", f"{fmt(requirement.required_reducer_torque_nm,1)} N·m"),
-        ("Potência necessária no redutor", f"{fmt(requirement.required_reducer_power_kw,2)} kW / {fmt(kw_to_cv(requirement.required_reducer_power_kw),2)} cv"),
+        ("Potência necessária no redutor", f"{fmt(requirement.required_reducer_power_kw,2)} kW"),
     ], columns=3)
 with col_connection_image:
     section_bar("ESQUEMA DO ACIONAMENTO")
@@ -502,104 +498,74 @@ supply_mode = st.radio(
 )
 
 if supply_mode == "Motoredutor completo":
-    # Preenchimento da linha do catálogo: P_Mot e M_2M são dados de ENTRADA.
-    # Não confundir M_2M (torque produzido) com M_2Nom (limite do redutor).
-    st.session_state.setdefault("gearmotor_cv", 1.0)
-    st.session_state.setdefault("gearmotor_kw", cv_to_kw(st.session_state["gearmotor_cv"]))
-    st.session_state.setdefault("gm_motor_rpm", 1700.0)
-    st.session_state.setdefault("gm_ratio", 35.91)
-    st.session_state.setdefault(
-        "gm_n2", st.session_state["gm_motor_rpm"] / st.session_state["gm_ratio"]
-    )
-    st.markdown("**Dados da linha selecionada no catálogo do fabricante**")
+    # Campos em um único bloco, sem seleção de origem e sem catálogo embutido.
+    # As duas potências permanecem sincronizadas, mas os dados de saída são
+    # informados pelo usuário (torque e limite radial não são inferidos).
+    st.session_state.setdefault("gearmotor_kw", cv_to_kw(3.0))
+    st.session_state.setdefault("gearmotor_cv", kw_to_cv(st.session_state["gearmotor_kw"]))
+
     gm_top = st.columns(6, gap="small")
     with gm_top[0]:
         gm_manufacturer = st.text_input("Fabricante", "IBR")
     with gm_top[1]:
-        gm_model = st.text_input("Modelo", "412A")
+        gm_model = st.text_input("Modelo", "Q090")
     with gm_top[2]:
-        number_input_pt(
-            "Potência nominal do motor [cv]", min_value=.001,
-            value=1.0, step=.1, format="%.3f", key="gearmotor_cv",
-            on_change=power_from_cv, args=("gearmotor",),
-        )
+        gm_motor_power = number_input_pt(
+            "Potência nominal do motor [kW]", min_value=.001,
+            value=cv_to_kw(3.0), step=.1, format="%.3f", key="gearmotor_kw",
+            on_change=power_from_kw, args=("gearmotor",))
     with gm_top[3]:
         number_input_pt(
-            "Potência nominal do motor [kW]", min_value=.001,
-            value=cv_to_kw(1.0), step=.1, format="%.3f", key="gearmotor_kw",
-            on_change=power_from_kw, args=("gearmotor",),
-        )
+            "Potência nominal do motor [cv]", min_value=.001,
+            value=3.0, step=.1, format="%.3f", key="gearmotor_cv",
+            on_change=power_from_cv, args=("gearmotor",))
+    # Captura a variável controlada após ambas as entradas.
     gm_motor_power = float(st.session_state["gearmotor_kw"])
     with gm_top[4]:
         gm_motor_speed = number_input_pt(
             "Rotação nominal do motor [rpm]", min_value=.01,
-            value=1700., step=1., key="gm_motor_rpm",
-            on_change=sync_gm_speed_from_ratio,
-        )
+            value=1700., step=10., key="gearmotor_rpm",
+            on_change=_sync_manual_speed_from_ratio)
     with gm_top[5]:
         gm_service_factor = number_input_pt(
-            "FS fabricante [-]", min_value=.001, value=1.10,
-            step=.05, key="gm_manual_fs",
-            help="Fator de serviço da tabela IBR: f.s. = M2Nom / M2M. É arredondado no catálogo; não multiplica o torque produzido.",
-        )
+            "FS fabricante [-]", min_value=0., value=1.10,
+            step=.05, key="gm_manual_fs")
 
-    gm_bottom = st.columns(5, gap="small")
+    gm_bottom = st.columns(4, gap="small")
     with gm_bottom[0]:
         gm_ratio = number_input_pt(
-            "Redução i (1:i) [-]", min_value=.001,
-            value=35.91, step=.01, format="%.3f", key="gm_ratio",
-            on_change=sync_gm_speed_from_ratio,
-        )
+            "Redução i (1:i) [-]", min_value=.001, value=40.,
+            step=1., format="%.3f", key="gm_ratio",
+            on_change=_sync_manual_speed_from_ratio)
+    # n2 e i são sincronizados em ambos os sentidos, sem sobrescrever M2.
+    st.session_state.setdefault("gm_manual_output_rpm", gm_motor_speed / gm_ratio)
     with gm_bottom[1]:
-        number_input_pt(
-            "Rotação de saída n2 [rpm]", min_value=.001,
-            value=1700.0/35.91, step=.1, format="%.3f", key="gm_n2",
-            on_change=sync_gm_ratio_from_speed,
-            help="Valor da tabela. É sincronizado com n1/i; ao digitá-lo, a redução é atualizada.",
-        )
+        gm_output_speed = number_input_pt(
+            "Rotação de saída [rpm]", min_value=.01,
+            value=gm_motor_speed / gm_ratio, step=1.,
+            key="gm_manual_output_rpm", on_change=_sync_manual_ratio_from_speed)
     with gm_bottom[2]:
         gm_output_torque = number_input_pt(
-            "Torque de saída M2M [N·m]", min_value=.001,
-            value=142.4, step=1., format="%.2f", key="gm_m2m",
-            help="Torque M2M fornecido pelo motor indicado no catálogo, NÃO o torque nominal limite M2Nom.",
-        )
+            "Torque informado [N·m]", min_value=.01,
+            value=366.8, step=10., key="gm_manual_torque")
     with gm_bottom[3]:
         gm_radial = number_input_pt(
-            "FR2 admissível [N]", min_value=0.,
-            value=2927., step=100., key="gm_manual_radial",
-            help="Limite radial admissível no eixo de saída, não uma força aplicada calculada.",
-        )
-    with gm_bottom[4]:
-        gm_axial = number_input_pt(
-            "FA admissível [N]", min_value=0.,
-            value=585., step=50., key="gm_manual_axial",
-            help="Limite axial do catálogo, não uma força aplicada calculada.",
-        )
+            "Limite radial informado [N]", min_value=0.,
+            value=4580., step=100., key="gm_manual_radial")
 
-    gm_output_speed = gm_motor_speed / gm_ratio
-    gm_output_power = 2.0 * pi * gm_output_speed * gm_output_torque / 60000.0
-    gm_output_power_cv = kw_to_cv(gm_output_power)
-    gm_eff_used = 100.0 * gm_output_power / gm_motor_power
-    gm_mode_detail = "Saída calculada a partir de M2M e n2 da linha catalogada"
-    cell_grid([
-        ("Rotação de saída", f"{fmt(gm_output_speed,2)} rpm"),
-        ("Torque fornecido M2M", f"{fmt(gm_output_torque,2)} N·m"),
-        ("Potência disponível", f"{fmt(gm_output_power_cv,3)} cv"),
-        ("Potência disponível", f"{fmt(gm_output_power,3)} kW"),
-        ("Rendimento calculado", f"{fmt(gm_eff_used,2)} %"),
-    ], columns=5)
-    if gm_eff_used > 100.5:
-        st.error(
-            "Os dados de catálogo informados implicam rendimento superior a 100 %. "
-            "Confirme se o torque inserido é M2M (torque fornecido) e não M2Nom (limite nominal)."
-        )
-    elif gm_eff_used > 100.0:
-        st.warning("O rendimento calculado supera 100 % em até 0,5 ponto; confira arredondamentos do catálogo.")
-    st.caption(
-        "P2 = 2π·n2·M2M/60.000; η = P2/Pmotor. O FS do fabricante expressa "
-        "a capacidade nominal relativa a M2M e não aumenta a potência fornecida pelo motor. "
-        "Como o FS é arredondado, M2Nom não deve ser reconstruído como valor exato a partir dele."
-    )
+    gm_output_power = gm_output_torque * 2 * pi * gm_output_speed / 60000
+    gm_eff_used = (100 * gm_output_power / gm_motor_power
+                   if gm_motor_power > 0 else None)
+    gm_mode_detail = "DADOS DE SAÍDA INFORMADOS PELO USUÁRIO"
+    if abs(gm_motor_speed / gm_ratio / gm_output_speed - 1) > 0.01:
+        st.warning("Inconsistência entre n1, i e n2. Confira os dados informados.")
+    if gm_output_power > gm_motor_power + 1e-9:
+        st.error("Os valores informados de torque e rotação exigem potência "
+                 "de saída superior à potência nominal do motor.")
+    st.caption("A redução e a rotação de saída são sincronizadas (n₂ = n₁/i). "
+               "Torque e limite radial são dados informados do fabricante; "
+               "a potência mecânica de saída é calculada por P₂ = M₂·2πn₂/60.000.")
+
     drive = complete_gearmotor_output(CompleteGearmotorInput(
         manufacturer=gm_manufacturer, model=gm_model,
         motor_power_kw=gm_motor_power, motor_speed_rpm=gm_motor_speed,
@@ -608,6 +574,7 @@ if supply_mode == "Motoredutor completo":
         admissible_radial_force_n=gm_radial,
         manufacturer_service_factor=gm_service_factor,
     ))
+
 else:
     section_bar("REDUTOR")
     r = st.columns(4)
@@ -677,7 +644,7 @@ preview_output = calculate_final_output(drive, transmission, conveyor_dp)
 cell_grid([
     ("Rotação disponível no redutor",f"{fmt(drive.reducer_output_speed_rpm,2)} rpm"),
     ("Torque disponível no redutor",f"{fmt(drive.reducer_output_torque_nm,2)} N·m"),
-    ("Potência disponível no redutor",f"{fmt(drive.reducer_output_power_kw,3)} kW / {fmt(kw_to_cv(drive.reducer_output_power_kw),3)} cv"),
+    ("Potência disponível no redutor",f"{fmt(drive.reducer_output_power_kw,3)} kW"),
     ("Velocidade disponível no transportador",f"{fmt(preview_output.linear_speed_m_min,2)} m/min"),
 ],columns=4)
 
@@ -692,7 +659,7 @@ with comparison_columns[0]:
         ("Força total", f"{fmt(conveyor.force_before_design_factor_n,2)} N"),
         ("Força por via (sem FS)", f"{fmt(conveyor.force_per_strand_n,2)} N"),
         ("Torque no eixo", f"{fmt(conveyor.required_axis_torque_nm,2)} N·m"),
-        ("Potência no eixo", f"{fmt(conveyor.required_axis_power_kw,3)} kW / {fmt(conveyor.required_axis_power_cv,3)} cv"),
+        ("Potência no eixo", f"{fmt(conveyor.required_axis_power_kw,3)} kW"),
         ("Rotação no eixo", f"{fmt(conveyor.required_axis_speed_rpm,2)} rpm"),
     ], columns=1)
 with comparison_columns[1]:
@@ -724,7 +691,7 @@ with comparison_columns[2]:
         ("Força total", f"{fmt(corrected_force_n,2)} N"),
         ("Força por via", f"{fmt(corrected_strand_force_n,2)} N"),
         ("Torque no eixo", f"{fmt(corrected_torque_nm,2)} N·m"),
-        ("Potência no eixo", f"{fmt(corrected_power_kw,3)} kW / {fmt(corrected_power_cv,3)} cv"),
+        ("Potência no eixo", f"{fmt(corrected_power_kw,3)} kW"),
         ("Rotação no eixo", f"{fmt(conveyor.required_axis_speed_rpm,2)} rpm"),
     ], columns=1)
 
@@ -741,11 +708,7 @@ compare_numeric=[]
 for label,required,available,unit,is_speed in comparison_data:
     r,m,state=ratio_metrics(available,required,speed=is_speed)
     compare_numeric.append((label,required,available,r,m,state,is_speed))
-    req_display = (f"{fmt(required,3)} kW / {fmt(kw_to_cv(required),3)} cv"
-                   if unit == "kW" else f"{fmt(required,2)} {unit}")
-    avail_display = (f"{fmt(available,3)} kW / {fmt(kw_to_cv(available),3)} cv"
-                     if unit == "kW" else f"{fmt(available,2)} {unit}")
-    compare_rows.append((label,req_display,avail_display,
+    compare_rows.append((label,f"{fmt(required,2)} {unit}",f"{fmt(available,2)} {unit}",
                          fmt(r,3) if r is not None else "—",
                          f"{fmt(m,1)} %" if m is not None else "—",state))
 if internal_coupling != 'Direto':
@@ -922,12 +885,7 @@ report_sections = [
             ("Relação de redução", fmt(gm_ratio,3)),
             ("Fator de serviço do fabricante", fmt(gm_service_factor,2) if gm_service_factor is not None else "Não informado"),
             ("Critério de cálculo do acionamento",gm_mode_detail),
-            ("Torque fornecido M2M do catálogo",f"{fmt(gm_output_torque,2)} N·m"),
-            ("Rotação de saída n2 do catálogo",f"{fmt(gm_output_speed,3)} rpm"),
-            ("Potência mecânica disponível",f"{fmt(gm_output_power,3)} kW / {fmt(gm_output_power_cv,3)} cv"),
-            ("Rendimento calculado",f"{fmt(gm_eff_used,2)} %"),
-            ("FR2 admissível do catálogo",f"{fmt(gm_radial,2)} N"),
-            ("FA admissível do catálogo",f"{fmt(gm_axial,2)} N") ]
+            ("Potência de saída implícita / potência do motor",f"{fmt(gm_eff_used,2)} %" if gm_eff_used is not None else "Não informado") ]
            if supply_mode == "Motoredutor completo" else [
             ("Fabricante do redutor", reducer_manufacturer),
             ("Modelo do redutor", reducer_model),
@@ -951,9 +909,9 @@ report_sections = [
 report_notes = [
     "Dependências: alterar massa, atrito ou distância entre centros propaga as alterações para as forças e demanda. "
     "Alterar Dp também altera a massa dos arcos, a rotação requerida e a velocidade linear disponível.",
-    "Motoredutor completo (catálogo): n2=n1/i; M2=M2M informado; P2=2π×n2×M2M/60000; "
-    "ηimplícito=P2/Pmotor. O M2Nom é um limite, não o torque entregue. "
-    "FS fabricante, FR2 e FA são dados de verificação, não fontes de potência.",
+    "Saída informada: n2=n1/i; M2 e FR2 são dados independentes fornecidos pelo usuário. "
+    "P2 = 2πn2M2/60000 (kW) e muda com n2 quando M2 é mantido constante. "
+    "Não é possível obter automaticamente o torque nominal de outra redução sem dados do fabricante.",
     "Equações: m_sup=N×q×C; m_ret=N×q×C (guiado); m_arcos=N×q×π×Dp; m_móvel=m_carga+m_correntes.",
     "Atrito: F_sup=μ_sup×(m_carga+m_sup)×g×cos(α); F_ret=μ_ret×m_ret×g×cos(α).",
     "Demanda: F_base=F_regime+F_aceleração; F_aceleração=m_móvel×v/t_aceleração; M_base=F_base×Dp/2; P_base=F_base×v/1000.",
@@ -983,32 +941,27 @@ st.download_button(
 )
 st.caption("O relatório registra os valores atuais. Abra o arquivo HTML no navegador e selecione Imprimir / Salvar como PDF.")
 
-# A interface de impressão é renderizada neste local depois que o memorial e
-# a calculadora auxiliar tiverem calculado seus resultados e fórmulas.
-print_page_slot = st.empty()
-
 # =============================================================================
 # MAPA DO GRAFO DE DEPENDÊNCIAS: só alteram grandezas fisicamente dependentes.
 # =============================================================================
-dependency_map_markdown = """| Entrada alterada | Consequências recalculadas |
+with st.expander("Mapa de dependências · entradas e efeitos"):
+    st.markdown("""| Entrada alterada | Consequências recalculadas |
 |---|---|
 | C, quantidade de vias, massa linear | Massas dos trechos, atritos, massa móvel, aceleração, força, torque e potência requeridos |
 | Dp do transportador | Massa nos arcos, massa móvel, aceleração, torque, rotação necessária e velocidade linear disponível |
 | Carga, μ superior, μ retorno, tipo de retorno, inclinação, F adicional | Forças resistentes, força de projeto base, torque e potência requeridos |
 | Velocidade desejada, tempo de aceleração, aceleração ligada/desligada | Aceleração, força total, potência, rotação requerida e comparação |
 | FS da aplicação | Somente força, torque e potência requeridos corrigidos, relação e margem (não altera velocidade) |
-| Potência nominal do motor (kW ou cv) | Converte unidades e recalcula η implícito; M2M permanece o valor inserido do catálogo |
-| Rotação nominal do motor ou redução i | Atualiza n2=n1/i, potência disponível, rendimento implícito e velocidade linear; M2M é entrada catalogada |
-| Rotação de saída n2 | Atualiza a redução i=n1/n2, potência disponível, rendimento implícito e velocidade linear |
-| Torque de saída M2M informado | Atualiza potência disponível, rendimento implícito, relação de capacidade e margem |
-| FS do fabricante, FR2 e FA informados | Limites e referência de capacidade, sem aumentar o torque M2M ou a potência produzida |
+| Potência nominal do motor (kW ou cv) | Atualiza a unidade vinculada e a verificação de coerência de potência; não inventa torque ou rendimento do redutor |
+| Rotação do motor, i ou rotação de saída | Sincronizam n2 = n1/i; atualizam a potência derivada de n2 e M2, a velocidade linear e a comparação |
+| Torque de saída informado | Atualiza potência de saída, capacidade e comparação; não altera a redução |
+| FS do fabricante, limite radial informado | Atualizam apenas os respectivos dados e verificações pertinentes |
 | Dp1, Dp2, η da corrente secundária | Relação da transmissão, rotação/torque/potência no eixo e no redutor, comparação |
-"""
-with st.expander("Mapa de dependências · entradas e efeitos"):
-    st.markdown(dependency_map_markdown)
-    st.caption("No motoredutor completo, n2 e M2M vêm da linha informada do catálogo; "
-               "a potência e o rendimento implícito são calculados. O FS do "
-               "fabricante não é confundido com eficiência.")
+| Torque/FR2 da saída informada | Potência derivada e verificação; FR2 altera somente o limite de carga radial |
+""")
+    st.caption("No modo de saída informada, o torque não é recalculado por hipótese: "
+               "ao mudar i, n2 e a potência implícita mudam para o torque informado. "
+               "A especificação de um novo torque deve vir do fabricante.")
 
 # =============================================================================
 # MEMORIAL DE EQUAÇÕES E DEPENDÊNCIAS — valores atuais, sem arredondar internamente
@@ -1023,53 +976,13 @@ def memorial_number(value: float, decimals: int = 2) -> str:
     return number.replace(",", "{,}")
 
 
-memorial_print_parts: list[str] = []
-
-
-def _inline_markdown_html(value: str) -> str:
-    safe = escape(value)
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
-
-
-def memorial_markdown(text: str) -> None:
-    st.markdown(text)
-    lines = text.splitlines()
-    bullet_lines = [line for line in lines if line.startswith("- ")]
-    if bullet_lines:
-        memorial_print_parts.append("<ul>" + "".join(
-            f"<li>{_inline_markdown_html(line[2:])}</li>" for line in bullet_lines
-        ) + "</ul>")
-    elif text.startswith("### "):
-        memorial_print_parts.append(f"<h3>{_inline_markdown_html(text[4:])}</h3>")
-    elif text.startswith("**") and text.endswith("**"):
-        memorial_print_parts.append(f"<h4>{_inline_markdown_html(text[2:-2])}</h4>")
-    else:
-        memorial_print_parts.append(f"<p>{_inline_markdown_html(text)}</p>")
-
-
-def memorial_caption(text: str) -> None:
-    st.caption(text)
-    memorial_print_parts.append(f'<p class="memorial-note">{escape(text)}</p>')
-
-
-def memorial_latex(tex: str) -> None:
-    st.latex(tex)
-    memorial_print_parts.append(f'<div class="memorial-equation">\\[{escape(tex)}\\]</div>')
-
-
 def memorial_step(title: str, symbolic: str, substituted: str,
                   observation: str | None = None) -> None:
     st.markdown(f"**{title}**")
     st.latex(symbolic)
     st.latex(substituted)
-    memorial_print_parts.append(
-        f"<h4>{escape(title)}</h4>"
-        f'<div class="memorial-equation">\\[{escape(symbolic)}\\]</div>'
-        f'<div class="memorial-equation">\\[{escape(substituted)}\\]</div>'
-    )
     if observation:
         st.caption(observation)
-        memorial_print_parts.append(f'<p class="memorial-note">{escape(observation)}</p>')
 
 
 with st.expander("Memorial de cálculo · fórmulas e dependências"):
@@ -1083,27 +996,27 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
     n_ret = conveyor.return_chain_mass_kg * g * cos(radians(inclination_deg))
     omega_req = 2.0 * pi * conveyor.required_axis_speed_rpm / 60.0
 
-    memorial_markdown(
+    st.markdown(
         "A sequência abaixo começa nas entradas geométricas e operacionais, "
         "calcula as massas, obtém as forças resistentes, acrescenta a aceleração "
         "e chega à **força, rotação, torque e potência exigidos no eixo**. "
         "Todos os números são atualizados com os valores informados na calculadora. "
         "As substituições numéricas são exibidas arredondadas; as operações usam precisão completa."
     )
-    memorial_caption(
+    st.caption(
         "Fluxo lógico: C, Dp, q, vias e tipo de retorno → massas das correntes → "
         "massa apoiada + atritos → resistência em regime → aceleração → "
         "força requerida → torque, rotação e potência → FS → "
         "requisito do redutor → relação entre disponível e requerido."
     )
-    memorial_markdown("### 0 · Dados necessários e conversões")
-    memorial_markdown("**Entradas do dimensionamento**")
-    memorial_caption(
+    st.markdown("### 0 · Dados necessários e conversões")
+    st.markdown("**Entradas do dimensionamento**")
+    st.caption(
         f"Geometria: C = {fmt(center_distance_m,2)} m; Dp = {fmt(conveyor_dp,2)} mm; "
         f"vias Nc = {int(strands)}; massa linear por via q = {fmt(chain_mass_per_m,2)} kg/m; "
         f"retorno = {return_mode}."
     )
-    memorial_caption(
+    st.caption(
         f"Operação: carga mc = {fmt(load_mass,2)} kg; μsup = {fmt(mu_top,3)}; "
         f"μret = {fmt(mu_return,3) if internal_return_type == 'Guiado' else 'não aplicável'}; "
         f"inclinação α = {fmt(inclination_deg,2)}°; "
@@ -1122,10 +1035,10 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         r"v[\mathrm{m/s}]=\frac{v[\mathrm{m/min}]}{60}",
         rf"v=\frac{{{m(linear_speed,2)}}}{{60}}=\boxed{{{m(v_m_s,5)}\ \mathrm{{m/s}}}}"
     )
-    memorial_caption("Adota-se aceleração gravitacional g = 9,81 m/s². "
+    st.caption("Adota-se aceleração gravitacional g = 9,81 m/s². "
                "O ângulo informado em graus é convertido internamente para radianos nas funções trigonométricas.")
 
-    memorial_markdown("### 1 · Geometria → massas das correntes")
+    st.markdown("### 1 · Geometria → massas das correntes")
     memorial_step(
         "1.1 · Massa das correntes no trecho superior",
         r"m_{sup}=N_c\,q\,C",
@@ -1172,7 +1085,7 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         rf"=\boxed{{{m(conveyor.total_chain_mass_kg,2)}\ \mathrm{{kg}}}}"
     )
 
-    memorial_markdown("### 2 · Massas apoiadas → normais → forças de atrito")
+    st.markdown("### 2 · Massas apoiadas → normais → forças de atrito")
     memorial_step(
         "2.1 · Massa total sobre as guias superiores",
         r"m_{total,sup}=m_c+m_{sup}",
@@ -1209,9 +1122,9 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
             rf"=\boxed{{{m(conveyor.return_friction_n,2)}\ \mathrm{{N}}}}"
         )
     else:
-        memorial_markdown("**2.4 · Retorno livre: sem atrito das guias inferiores**")
-        memorial_latex(r"F_{ret}=0\quad\, (\mathrm{retorno\ sem\ guias})")
-        memorial_caption("A massa da corrente inferior continua no sistema móvel. "
+        st.markdown("**2.4 · Retorno livre: sem atrito das guias inferiores**")
+        st.latex(r"F_{ret}=0\quad\, (\mathrm{retorno\ sem\ guias})")
+        st.caption("A massa da corrente inferior continua no sistema móvel. "
                    "Sua tração pela flecha é estimada a seguir, mas não é somada à força de atrito.")
         memorial_step(
             "2.5 · Tração aproximada da corrente suspensa, por via",
@@ -1240,7 +1153,7 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         "É a força para manter velocidade constante; não inclui a aceleração."
     )
 
-    memorial_markdown("### 3 · Resistência em regime + aceleração → força exigida")
+    st.markdown("### 3 · Resistência em regime + aceleração → força exigida")
     memorial_step(
         "3.1 · Massa total acelerada",
         r"m_{mov}=m_c+m_{corr}",
@@ -1256,8 +1169,8 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
             rf"=\boxed{{{m(conveyor.acceleration_m_s2,5)}\ \mathrm{{m/s^2}}}}"
         )
     else:
-        memorial_markdown("**3.2 · Aceleração desativada**")
-        memorial_latex(r"a=0\ \mathrm{m/s^2}")
+        st.markdown("**3.2 · Aceleração desativada**")
+        st.latex(r"a=0\ \mathrm{m/s^2}")
     memorial_step(
         "3.3 · Força para acelerar a massa móvel",
         r"F_a=m_{mov}\,a",
@@ -1278,7 +1191,7 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         "Assume distribuição uniforme entre as vias; não determina as tensões internas de cada elo."
     )
 
-    memorial_markdown("### 4 · Força + diâmetro + velocidade → torque, rotação e potência")
+    st.markdown("### 4 · Força + diâmetro + velocidade → torque, rotação e potência")
     memorial_step(
         "4.1 · Raio primitivo e torque exigido no eixo",
         r"r=\frac{D_p}{2}\qquad M_{req}=F_{req}\,r",
@@ -1318,7 +1231,7 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         rf"=\boxed{{{m(conveyor.required_axis_power_cv,4)}\ \mathrm{{cv}}}}"
     )
 
-    memorial_markdown("### 5 · Fator de serviço da aplicação (fora da demanda física)")
+    st.markdown("### 5 · Fator de serviço da aplicação (fora da demanda física)")
     memorial_step(
         "5.1 · Demanda corrigida pelo FS escolhido",
         r"F_{FS}=FS\,F_{req}\quad\, F_{via,FS}=FS\,F_{via}\quad\, "
@@ -1331,7 +1244,7 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         "O FS da aplicação não equivale ao fator de serviço informado pelo fabricante."
     )
 
-    memorial_markdown("### 6 · Conexão do acionamento → requisito na saída do redutor")
+    st.markdown("### 6 · Conexão do acionamento → requisito na saída do redutor")
     if internal_coupling == "Direto":
         memorial_step(
             "6.1 · Acionamento direto",
@@ -1358,38 +1271,24 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
             rf"P_{{red,req}}={m(corrected_reducer_requirement.required_reducer_power_kw,4)}\ \mathrm{{kW}}"
         )
 
-    memorial_markdown("### 7 · Acionamento informado → capacidade e comparação")
+    st.markdown("### 7 · Acionamento informado → capacidade e comparação")
     if supply_mode == "Motoredutor completo":
         memorial_step(
-            "7.1 · Rotação de saída e relação de redução",
+            "7.1 · Rotação de saída pela redução informada",
             r"i=\frac{n_1}{n_2}\qquad n_2=\frac{n_1}{i}",
             rf"n_2=\frac{{{m(gm_motor_speed,2)}}}{{{m(gm_ratio,3)}}}"
             rf"={m(gm_output_speed,2)}\ \mathrm{{rpm}}",
-            "A relação i e n2 são sincronizadas. A linha do fabricante informa M2M para o motor especificado."
-        )
-        memorial_step(
-            "7.1a · Torque M2M e potência de saída do catálogo",
-            r"P_2=\frac{2\pi n_2M_{2M}}{60000}",
-            rf"P_2=\frac{{2\pi\cdot{m(gm_output_speed,3)}\cdot{m(gm_output_torque,2)}}}{{60000}}"
-            rf"=\boxed{{{m(gm_output_power,4)}\ \mathrm{{kW}}}}"
-        )
-        memorial_step(
-            "7.1b · Potência disponível em cv e rendimento implícito",
-            r"P_{2,cv}=\frac{P_{2,kW}}{0{,}73549875}\qquad "
-            r"\eta_{impl}=\frac{P_2}{P_{motor}}\cdot100\%",
-            rf"P_{{2,cv}}={m(gm_output_power_cv,3)}\ \mathrm{{cv}},\quad\,"
-            rf"\eta_{{impl}}={m(gm_eff_used,2)}\%",
-            "O FS do fabricante não é rendimento. M2Nom é capacidade admissível e não o torque produzido."
+            "O valor de torque M₂ é informado pelo usuário e não é estimado a partir da redução."
         )
     else:
-        memorial_markdown("**7.1 · Redutor e motor separados**")
-        memorial_caption("O modelo operacional utiliza a rotação do motor ajustada pela razão "
+        st.markdown("**7.1 · Redutor e motor separados**")
+        st.caption("O modelo operacional utiliza a rotação do motor ajustada pela razão "
                    "entre frequências, a redução do redutor, o rendimento e os limites de entrada/torque informados. "
                    "A potência elétrica de entrada não é calculada pela potência nominal do eixo do motor.")
-        memorial_latex(r"n_{m,op}=n_{m,nom}\frac{f_{op}}{f_{nom}}\qquad n_2=\frac{n_{m,op}}{i}")
-        memorial_latex(r"P_{m,lim}=\min(P_{m,modelo},P_{red,entrada,max})")
-        memorial_latex(r"M_2=\min\left(\frac{9550P_{m,lim}}{n_{m,op}}\,i\eta_{red},M_{red,max}\right)")
-        memorial_caption(f"n₂ = {fmt(drive.reducer_output_speed_rpm,2)} rpm; "
+        st.latex(r"n_{m,op}=n_{m,nom}\frac{f_{op}}{f_{nom}}\qquad n_2=\frac{n_{m,op}}{i}")
+        st.latex(r"P_{m,lim}=\min(P_{m,modelo},P_{red,entrada,max})")
+        st.latex(r"M_2=\min\left(\frac{9550P_{m,lim}}{n_{m,op}}\,i\eta_{red},M_{red,max}\right)")
+        st.caption(f"n₂ = {fmt(drive.reducer_output_speed_rpm,2)} rpm; "
                    f"M₂ = {fmt(drive.reducer_output_torque_nm,2)} N·m; "
                    f"P₂ = {fmt(drive.reducer_output_power_kw,3)} kW")
     memorial_step(
@@ -1414,21 +1313,21 @@ with st.expander("Memorial de cálculo · fórmulas e dependências"):
         rf"v_{{disp}}=\pi\cdot{m(d_m,5)}\cdot{m(final_output.axis_speed_rpm,3)}"
         rf"=\boxed{{{m(final_output.linear_speed_m_min,2)}\ \mathrm{{m/min}}}}"
     )
-    memorial_markdown("**7.5 · Relação de capacidade, margem e situação**")
-    memorial_latex(r"R=\frac{X_{disp}}{X_{req,FS}}\qquad "
+    st.markdown("**7.5 · Relação de capacidade, margem e situação**")
+    st.latex(r"R=\frac{X_{disp}}{X_{req,FS}}\qquad "
              r"\mathrm{Margem}=(R-1)\,100\%")
     for label, req, avail, ratio, margin, status, is_speed in compare_numeric:
         if ratio is None:
-            memorial_caption(f"{label}: verificação não determinada ({status}).")
+            st.caption(f"{label}: verificação não determinada ({status}).")
         else:
-            memorial_caption(f"{label}: requerido = {fmt(req,3)}; disponível = {fmt(avail,3)}; "
+            st.caption(f"{label}: requerido = {fmt(req,3)}; disponível = {fmt(avail,3)}; "
                        f"R = {fmt(ratio,3)}; margem = {fmt(margin,1)}%; situação = {status}.")
-    memorial_caption("R < 1: capacidade abaixo da demanda. Para velocidade, também se verifica "
+    st.caption("R < 1: capacidade abaixo da demanda. Para velocidade, também se verifica "
                "excesso sobre a velocidade desejada. Uma razão de torque adequada não "
                "substitui a verificação da velocidade e das condições de serviço.")
 
-    memorial_markdown("### 8 · Premissas e limites do modelo")
-    memorial_markdown(
+    st.markdown("### 8 · Premissas e limites do modelo")
+    st.markdown(
         "- A massa linear informada corresponde a uma via completa de corrente. "
         "A massa dos arcos pressupõe duas rodas de mesmo diâmetro primitivo.\n"
         "- As forças de atrito usam o coeficiente equivalente informado para as superfícies. "
@@ -1474,146 +1373,3 @@ with st.expander("Massa transportada · cálculo auxiliar"):
         c_volume, c_mass = cylindrical_mass(c_d, c_l, density)
         cell_grid([("Volume", f"{fmt(c_volume,3)} m³"),
                    ("Massa", f"{fmt(c_mass,1)} kg")], columns=2)
-
-# =============================================================================
-# IMPRESSÃO DA PÁGINA COM ANEXOS OPCIONAIS
-# Calculadora principal sempre incluída; anexos são selecionados pelo usuário.
-# =============================================================================
-def _markdown_table_html(markdown_source: str) -> str:
-    """Converte a tabela de dependências existente, sem pacote adicional."""
-    table_lines = [line.strip() for line in markdown_source.splitlines() if line.strip().startswith("|")]
-    rows = []
-    for line in table_lines:
-        columns = [cell.strip() for cell in line.strip("|").split("|")]
-        if all(re.fullmatch(r"[-: ]+", x) for x in columns):
-            continue
-        rows.append(columns)
-    result = ['<table class="appendix-table"><thead><tr>']
-    for heading in rows[0]:
-        result.append(f"<th>{escape(heading)}</th>")
-    result.append("</tr></thead><tbody>")
-    for row in rows[1:]:
-        result.append("<tr>" + "".join(f"<td>{escape(cell)}</td>" for cell in row) + "</tr>")
-    result.append("</tbody></table>")
-    return "".join(result)
-
-
-def _asset_image_html(path: Path | None, alt: str) -> str:
-    """Imagem estática incorporada no HTML, sem exigir pasta assets no destino."""
-    if path is None or not path.is_file():
-        return ""
-    mime = "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else (
-        "image/webp" if path.suffix.lower() == ".webp" else "image/png")
-    content = base64.b64encode(path.read_bytes()).decode("ascii")
-    return (f'<figure class="print-image"><img src="data:{mime};base64,{content}" '
-            f'alt="{escape(alt)}"/><figcaption>{escape(alt)}</figcaption></figure>')
-
-
-def build_selected_page_html(include_dependencies: bool = False,
-                             include_memorial: bool = False,
-                             include_auxiliary: bool = False) -> str:
-    """Cria página de impressão a partir dos resultados atuais, com anexos opcionais."""
-    additions: list[str] = []
-    schematic = _asset_image_html(
-        IMG_RETURN if internal_return_type == "Guiado" else IMG_SAG,
-        "Esquema do sistema",
-    )
-    schematic += _asset_image_html(
-        IMG_DIRECT if internal_coupling == "Direto" else IMG_REDUCTION,
-        "Esquema do acionamento",
-    )
-    if schematic:
-        additions.append(f'<section class="print-diagrams"><h2>Esquemas da calculadora</h2>{schematic}</section>')
-    if include_dependencies:
-        additions.append('<section class="print-appendix"><h2>Mapa de dependências · entradas e efeitos</h2>'
-                         + _markdown_table_html(dependency_map_markdown) + '</section>')
-    if include_memorial:
-        additions.append('<section class="print-appendix memorial-appendix">'
-                         '<h2>Memorial de cálculo · fórmulas e dependências</h2>'
-                         + "\n".join(memorial_print_parts) + '</section>')
-    if include_auxiliary:
-        appendix_rows = [
-            ("Densidade do material", f"{fmt(density,2)} kg/m³"),
-            ("Prisma — comprimento ℓ1", f"{fmt(p_l1,2)} m"),
-            ("Prisma — largura ℓ2", f"{fmt(p_l2,2)} m"),
-            ("Prisma — altura ℓ3", f"{fmt(p_l3,2)} m"),
-            ("Prisma — volume", f"{fmt(p_volume,4)} m³"),
-            ("Prisma — massa", f"{fmt(p_mass,2)} kg"),
-            ("Cilindro — diâmetro", f"{fmt(c_d,2)} m"),
-            ("Cilindro — comprimento ℓ1", f"{fmt(c_l,2)} m"),
-            ("Cilindro — volume", f"{fmt(c_volume,4)} m³"),
-            ("Cilindro — massa", f"{fmt(c_mass,2)} kg"),
-        ]
-        rows_html = "".join('<tr><th scope="row">' + escape(label) + '</th><td>' + escape(value)
-                            + '</td></tr>' for label, value in appendix_rows)
-        images_html = _asset_image_html(IMG_PRISM, "Prisma retangular") + _asset_image_html(IMG_CYLINDER, "Cilindro / tora")
-        additions.append('<section class="print-appendix"><h2>Massa transportada · cálculo auxiliar</h2>'
-                         '<table><tbody>' + rows_html + '</tbody></table>' + images_html + '</section>')
-
-    extras = "\n".join(additions)
-    html = report_html.replace("<footer>", extras + "\n<footer>", 1)
-    if include_memorial:
-        # MathJax transforma a mesma sintaxe LaTeX exibida no Streamlit em
-        # fórmulas no relatório. Se o CDN estiver indisponível, permanece o TeX.
-        mathjax = '''<script>window.MathJax = {tex:{displayMath:[['\\\\[','\\\\]']]},
-            options:{skipHtmlTags:['script','noscript','style','textarea','pre']}};</script>
-        <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>'''
-        html = html.replace('</head>', mathjax + '\n</head>', 1)
-    extra_styles = '''<style>
-    .print-diagrams {display:flex;flex-wrap:wrap;gap:16px;}
-    .print-diagrams h2 {width:100%;}
-    .print-image {display:inline-block;max-width:46%;margin:6px 0;vertical-align:top;}
-    .print-image img {max-width:100%;max-height:190px;object-fit:contain;}
-    .print-image figcaption {font-size:9pt;color:#556;}
-    .print-appendix {break-inside:auto;page-break-inside:auto;}
-    .print-appendix h2,.print-appendix h3,.print-appendix h4 {break-after:avoid-page;page-break-after:avoid;}
-    .print-appendix h3 {font-size:13pt;color:#163b67;margin-top:20px;}
-    .print-appendix h4 {font-size:10.5pt;margin:14px 0 7px;}
-    .memorial-equation {text-align:center;overflow-wrap:anywhere;padding:8px 3px;
-        break-inside:avoid-page;page-break-inside:avoid;font-size:10pt;}
-    .memorial-note {font-size:9pt;color:#5e6670;}
-    .appendix-table th {width:auto;}
-    @media print { .print-image {max-width:45%;} .memorial-equation {padding:5px 0;} }
-    </style>'''
-    return html.replace('</head>', extra_styles + '\n</head>', 1)
-
-
-with print_page_slot.container():
-    if st.button('Imprimir página', key='show_print_options', type='secondary'):
-        st.session_state['print_options_open'] = not st.session_state.get('print_options_open', False)
-    if st.session_state.get('print_options_open', False):
-        st.caption('A calculadora principal será impressa. Selecione os anexos opcionais:')
-        print_dependencies = st.checkbox('Mapa de dependências · entradas e efeitos',
-                                         value=False, key='print_dependencies')
-        print_memorial = st.checkbox('Memorial de cálculo · fórmulas e dependências',
-                                     value=False, key='print_memorial')
-        print_auxiliary = st.checkbox('Massa transportada · cálculo auxiliar',
-                                      value=False, key='print_auxiliary')
-        selected_print_html = build_selected_page_html(print_dependencies, print_memorial, print_auxiliary)
-
-        # Com clique direto no controle, abre uma aba própria e a janela de
-        # impressão. O botão interno da nova aba permite repetir a impressão.
-        # O download a seguir é a alternativa para navegadores que bloqueiam
-        # abertura de novas abas a partir de componentes incorporados.
-        if hasattr(st, 'components'):
-            popup_code = json.dumps(selected_print_html, ensure_ascii=True).replace('</', '<\\/')
-            popup = '''<!doctype html><html><head><meta charset="utf-8">
-            <style>body{margin:0;font-family:Arial,sans-serif}
-            button{background:#163b67;color:white;border:0;border-radius:5px;
-                   padding:10px 18px;font-weight:600;cursor:pointer}
-            small{color:#667085;display:block;margin-top:5px}</style>
-            </head><body><button id="open" type="button">Abrir impressão</button>
-            <small id="hint">Abre a versão selecionada em uma nova aba para imprimir ou salvar como PDF.</small>
-            <script>const reportHTML = __REPORT_HTML__;
-            document.getElementById('open').addEventListener('click',()=>{
-                const tab=window.open('about:blank','_blank');
-                if(!tab){document.getElementById('hint').textContent='Abertura bloqueada: use o download HTML abaixo.';return;}
-                tab.document.open();tab.document.write(reportHTML);tab.document.close();tab.focus();
-            });</script></body></html>'''.replace('__REPORT_HTML__', popup_code)
-            st.components.v1.html(popup, height=77, scrolling=False)
-        st.download_button('Baixar página selecionada para impressão (HTML)',
-                           data=selected_print_html.encode('utf-8'),
-                           file_name='pagina_transportador_para_imprimir.html',
-                           mime='text/html',
-                           key='page_print_download',
-                           help='Alternativa: abra o arquivo HTML e use o botão Imprimir / Salvar como PDF.')
